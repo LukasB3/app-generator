@@ -48,6 +48,7 @@ let source: EventSource | undefined
 let clock: number | undefined
 let startedAt = 0
 let busy = false
+let finished = false
 
 const el = (tag: string, text = '', className = '') => {
   const node = document.createElement(tag)
@@ -76,8 +77,8 @@ const setTicket = (state: string, label: string, figure: string, note: string) =
 }
 
 const refreshSubmit = () => {
-  submit.disabled = busy || !captchaToken || prompt.value.trim().length < 5
-  submit.textContent = busy ? 'Building…' : 'Build my app'
+  submit.disabled = !finished && (busy || !captchaToken || prompt.value.trim().length < 5)
+  submit.textContent = finished ? 'Build another app' : busy ? 'Building…' : 'Build my app'
 }
 
 const showFormError = (message = '') => {
@@ -133,6 +134,7 @@ const render = (job: JobState) => {
     stopWatching()
     stopClock()
     busy = false
+    finished = job.status === 'done'
     refreshSubmit()
   }
 }
@@ -140,7 +142,7 @@ const render = (job: JobState) => {
 // Runs independently of the event stream, so reconnecting never stops it.
 const tick = () => {
   const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-  setTicket('building', 'Now building', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Most apps take two to four minutes. You can leave this page open.')
+  setTicket('building', 'Now building', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Most apps take under two minutes. You can leave this page open.')
 }
 
 const startClock = () => {
@@ -183,6 +185,7 @@ const reset = () => {
   stopWatching()
   stopClock()
   busy = false
+  finished = false
   lastStation = 'queued'
   history.replaceState(null, '', location.pathname)
   fileList.replaceChildren()
@@ -197,6 +200,7 @@ const reset = () => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
+  if (finished) return location.assign(location.pathname)
   if (submit.disabled) return
   showFormError()
   busy = true
