@@ -142,7 +142,7 @@ const render = (job: JobState) => {
 // Runs independently of the event stream, so reconnecting never stops it.
 const tick = () => {
   const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-  setTicket('building', 'Now building', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Most apps take two to four minutes. You can leave this page open.')
+  setTicket('building', 'Now building', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Most apps take under two minutes. You can leave this page open.')
 }
 
 const startClock = () => {
