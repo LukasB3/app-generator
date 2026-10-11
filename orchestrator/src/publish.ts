@@ -38,7 +38,7 @@ const appsRepo = (cfg: Config) => {
       await git('init', '--initial-branch=main')
       await git('remote', 'add', 'origin', cfg.APPS_REPO)
       await git('config', 'user.name', 'app-generator')
-      await git('config', 'user.email', 'app-generator@users.noreply.github.com')
+      await git('config', 'user.email', 'apps@app-generator.lukasbossert.com')
     }
     await git('fetch', '--depth=1', 'origin', 'main')
     await git('reset', '--hard', 'origin/main')
