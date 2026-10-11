@@ -48,6 +48,7 @@ let source: EventSource | undefined
 let clock: number | undefined
 let startedAt = 0
 let busy = false
+let finished = false
 
 const el = (tag: string, text = '', className = '') => {
   const node = document.createElement(tag)
@@ -76,8 +77,8 @@ const setTicket = (state: string, label: string, figure: string, note: string) =
 }
 
 const refreshSubmit = () => {
-  submit.disabled = busy || !captchaToken || prompt.value.trim().length < 5
-  submit.textContent = busy ? 'Building…' : 'Build my app'
+  submit.disabled = !finished && (busy || !captchaToken || prompt.value.trim().length < 5)
+  submit.textContent = finished ? 'Build another app' : busy ? 'Building…' : 'Build my app'
 }
 
 const showFormError = (message = '') => {
@@ -133,6 +134,7 @@ const render = (job: JobState) => {
     stopWatching()
     stopClock()
     busy = false
+    finished = job.status === 'done'
     refreshSubmit()
   }
 }
@@ -183,6 +185,7 @@ const reset = () => {
   stopWatching()
   stopClock()
   busy = false
+  finished = false
   lastStation = 'queued'
   history.replaceState(null, '', location.pathname)
   fileList.replaceChildren()
@@ -197,6 +200,7 @@ const reset = () => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
+  if (finished) return location.assign(location.pathname)
   if (submit.disabled) return
   showFormError()
   busy = true
