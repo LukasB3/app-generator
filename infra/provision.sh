@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time (and re-runnable) host setup for a fresh Ubuntu 24.04 server.
+# One-time (and re-runnable) host setup for a fresh Ubuntu 24.04 or 26.04 server.
 # Usage: sudo API_DOMAIN=api.app-generator.example WEB_ORIGIN=https://app-generator.example ./provision.sh
 set -euo pipefail
 

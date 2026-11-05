@@ -71,7 +71,7 @@ The tests cover the parts that carry the security claims: what the checker rejec
 
 ## Deployment
 
-On a fresh Ubuntu 24.04 server:
+On a fresh Ubuntu 24.04 or 26.04 server:
 
 ```sh
 sudo API_DOMAIN=api.app-generator.example WEB_ORIGIN=https://app-generator.example ./infra/provision.sh
