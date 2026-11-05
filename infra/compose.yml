@@ -20,6 +20,9 @@ services:
     pids_limit: 128
     mem_limit: 256m
     networks: [sandbox, egress]
+    # Host loopback only: the orchestrator screens prompts through the proxy
+    # with a job token, like a sandbox would.
+    ports: ['127.0.0.1:8788:8080']
 
   sandbox:
     build: ../sandbox

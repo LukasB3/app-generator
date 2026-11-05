@@ -10,7 +10,7 @@ const server = createProxy({
   apiKey: env('ANTHROPIC_API_KEY'),
   signingSecret: env('PROXY_SIGNING_SECRET'),
   policy: {
-    models: env('ALLOWED_MODELS', 'claude-sonnet-5-5,claude-haiku-4-5-20251001').split(','),
+    models: env('ALLOWED_MODELS', 'claude-sonnet-5-5,claude-haiku-4-5-20251001,claude-haiku-5-5').split(','),
     maxTokens: Number(env('MAX_TOKENS', '16000')),
     maxBodyBytes: Number(env('MAX_BODY_BYTES', '2000000')),
     maxRequestsPerJob: Number(env('MAX_REQUESTS_PER_JOB', '60')),
