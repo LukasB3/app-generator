@@ -12,6 +12,9 @@ const schema = z.object({
   IP_HASH_SECRET: secret,
   PROXY_SIGNING_SECRET: secret,
 
+  PROXY_URL: z.url().default('http://127.0.0.1:8788'),
+  SCREEN_MODEL: z.string().default('claude-haiku-5-5'),
+
   SANDBOX_LAUNCHER: z.string().default('/usr/local/sbin/ag-sandbox'),
   LIBS_DIR: z.string().default('/opt/app-generator/sandbox/libs'),
 

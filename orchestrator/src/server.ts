@@ -5,6 +5,7 @@ import Fastify, { type FastifyReply } from 'fastify'
 import type { OutgoingHttpHeaders } from 'node:http'
 import { z } from 'zod'
 import type { Config } from './config.js'
+import type { PromptScreen } from './screen.js'
 import type { Job, JobEvent, Store } from './store.js'
 import type { CaptchaCheck } from './turnstile.js'
 import type { Worker } from './worker.js'
@@ -26,9 +27,15 @@ export interface ServerDeps {
   store: Store
   worker: Worker
   captcha: CaptchaCheck
+  screen: PromptScreen
 }
 
-export const buildServer = async ({ cfg, store, worker, captcha }: ServerDeps) => {
+const SCREENED_OUT = {
+  nonsense: 'That does not read like an app idea yet. Describe what the app should do, for example "a 5-minute timer with a QR code".',
+  abusive: 'This request is against the rules of this demo: no hateful, sexual or unlawful content. Please describe a different app.',
+}
+
+export const buildServer = async ({ cfg, store, worker, captcha, screen }: ServerDeps) => {
   // Caddy on the same host is the only client, so its forwarded address is trusted.
   // Request logs carry no client address: visitors are only ever stored as keyed hashes.
   const app = Fastify({
@@ -51,6 +58,11 @@ export const buildServer = async ({ cfg, store, worker, captcha }: ServerDeps) =
   const view = (job: Job) => ({ id: job.id, status: job.status, position: store.position(job.id), url: job.url, error: job.error, now: Date.now() })
   const hashIp = (ip: string) => createHmac('sha256', cfg.IP_HASH_SECRET).update(clientKey(ip)).digest('hex').slice(0, 32)
   const refuse = (reply: FastifyReply, status: number, error: string) => reply.code(status).send({ error })
+  const limitError = (ipHash: string, now = Date.now()) => {
+    if (store.countSince(now - HOUR, ipHash) >= cfg.JOBS_PER_IP_PER_HOUR) return 'You have reached the hourly limit. Please come back later.'
+    if (store.countSince(now - HOUR) >= cfg.JOBS_PER_HOUR || store.countSince(now - 24 * HOUR) >= cfg.JOBS_PER_DAY) return 'The app generator has reached its capacity for now. Please come back later.'
+    if (store.queuedCount() >= cfg.QUEUE_MAX) return 'The queue is full right now. Please try again in a few minutes.'
+  }
 
   app.get('/api/health', () => ({ ok: true }))
 
@@ -59,14 +71,21 @@ export const buildServer = async ({ cfg, store, worker, captcha }: ServerDeps) =
     if (!parsed.success) return refuse(reply, 400, `Please describe your app in 5 to ${cfg.PROMPT_MAX_CHARS} characters.`)
     if (!(await captcha(parsed.data.captchaToken, req.ip))) return refuse(reply, 403, 'The captcha check failed. Please try again.')
 
-    const now = Date.now()
     const ipHash = hashIp(req.ip)
-    if (store.countSince(now - HOUR, ipHash) >= cfg.JOBS_PER_IP_PER_HOUR) return refuse(reply, 429, 'You have reached the hourly limit. Please come back later.')
-    if (store.countSince(now - HOUR) >= cfg.JOBS_PER_HOUR || store.countSince(now - 24 * HOUR) >= cfg.JOBS_PER_DAY) return refuse(reply, 429, 'The app generator has reached its capacity for now. Please come back later.')
-    if (store.queuedCount() >= cfg.QUEUE_MAX) return refuse(reply, 429, 'The queue is full right now. Please try again in a few minutes.')
+    const overLimit = limitError(ipHash)
+    if (overLimit) return refuse(reply, 429, overLimit)
 
     const id = newJobId()
-    store.createJob(id, parsed.data.prompt, ipHash, now)
+    const verdict = await screen(parsed.data.prompt, id)
+    if (verdict !== 'ok') {
+      req.log.info({ verdict }, 'prompt screened out')
+      return refuse(reply, 422, SCREENED_OUT[verdict])
+    }
+
+    // Other submissions may have been queued while the screen was running.
+    const nowOverLimit = limitError(ipHash)
+    if (nowOverLimit) return refuse(reply, 429, nowOverLimit)
+    store.createJob(id, parsed.data.prompt, ipHash)
     worker.kick()
     return reply.code(202).send(view(store.getJob(id)!))
   })

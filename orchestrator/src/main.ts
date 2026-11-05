@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { loadConfig } from './config.js'
 import { createPipeline } from './pipeline.js'
 import { createAppCleanup } from './publish.js'
+import { promptScreen } from './screen.js'
 import { buildServer } from './server.js'
 import { Store } from './store.js'
 import { turnstile } from './turnstile.js'
@@ -27,7 +28,7 @@ void purge()
 setInterval(() => void purge(), 24 * 3_600_000).unref()
 
 const worker = new Worker(store, createPipeline(cfg))
-const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET) })
+const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg) })
 
 await app.listen({ host: cfg.HOST, port: cfg.PORT })
 worker.kick()

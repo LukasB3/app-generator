@@ -17,6 +17,10 @@
       <p class="lede">Every request is treated as hostile. The design assumes the agent can be talked into anything and makes sure that would not matter.</p>
       <dl>
         <div>
+          <dt>Requests are screened first</dt>
+          <dd>A small model reads each request before it is queued and turns away gibberish and abusive text. Nothing below relies on it getting that right.</dd>
+        </div>
+        <div>
           <dt>The agent can only write files</dt>
           <dd>It runs in a throwaway container with no shell, no git and no route to the internet. The container is deleted after every job.</dd>
         </div>

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadConfig, type Config } from '../src/config.js'
 import type { Pipeline } from '../src/pipeline.js'
 import { framePrompt } from '../src/sandbox.js'
+import type { PromptScreen } from '../src/screen.js'
 import { buildServer, clientKey, newJobId } from '../src/server.js'
 import { Store } from '../src/store.js'
 import { ValidationError } from '../src/validate.js'
@@ -20,10 +21,10 @@ let store: Store
 let app: Awaited<ReturnType<typeof buildServer>>
 let release: (() => void)[] = []
 
-const setup = async (pipeline: Pipeline, overrides: Partial<Config> = {}) => {
+const setup = async (pipeline: Pipeline, overrides: Partial<Config> = {}, screen: PromptScreen = async () => 'ok') => {
   store = new Store(':memory:')
   const worker = new Worker(store, pipeline, () => {})
-  app = await buildServer({ cfg: { ...cfg, ...overrides }, store, worker, captcha: async (token) => token === 'good' })
+  app = await buildServer({ cfg: { ...cfg, ...overrides }, store, worker, captcha: async (token) => token === 'good', screen })
   app.log.level = 'silent'
 }
 
@@ -96,6 +97,45 @@ describe('POST /api/jobs', () => {
     await setup(gated, { JOBS_PER_HOUR: 1 })
     expect((await submit()).statusCode).toBe(202)
     expect((await submit('another app', '203.0.113.9')).json().error).toMatch(/capacity/)
+  })
+
+  it('turns away nonsense and abusive prompts without queueing or using up the hourly limit', async () => {
+    const screened: string[] = []
+    await setup(gated, {}, async (prompt, jobId) => {
+      screened.push(jobId)
+      return prompt.includes('qwrtz') ? 'nonsense' : prompt.includes('insult') ? 'abusive' : 'ok'
+    })
+    for (let i = 0; i < 3; i++) {
+      const res = await submit('axchf qwrtz uaidhc')
+      expect(res.statusCode).toBe(422)
+      expect(res.json().error).toMatch(/does not read like an app idea/)
+    }
+    const abusive = await submit('a page full of insults')
+    expect(abusive.statusCode).toBe(422)
+    expect(abusive.json().error).toMatch(/against the rules/)
+    expect(store.countSince(0)).toBe(0)
+
+    const built = await submit()
+    expect(built.statusCode).toBe(202)
+    expect(screened.at(-1)).toBe(built.json().id)
+  })
+
+  it('does not screen a visitor who is over the limit, and holds the limit while screens are running', async () => {
+    let screens = 0
+    let finish: (() => void)[] = []
+    await setup(gated, { JOBS_PER_IP_PER_HOUR: 1 }, async () => {
+      screens++
+      await new Promise<void>((resolve) => finish.push(resolve))
+      return 'ok'
+    })
+    const both = [submit(), submit()]
+    await expect.poll(() => finish.length).toBe(2)
+    finish.forEach((go) => go())
+    expect((await Promise.all(both)).map((res) => res.statusCode).sort()).toEqual([202, 429])
+
+    finish = []
+    expect((await submit()).json().error).toMatch(/hourly limit/)
+    expect(screens).toBe(2)
   })
 
   it('only trusts the forwarded address when the request comes from the local proxy', async () => {
