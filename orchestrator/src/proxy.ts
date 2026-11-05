@@ -44,15 +44,21 @@ export const vetRequest = (raw: Buffer, policy: ProxyPolicy): Verdict => {
   return { ok: true, body: JSON.stringify(body) }
 }
 
-// Pulls output token counts out of a streamed or plain Messages response.
-export const outputTokensIn = (text: string) => {
-  let total = 0
-  for (const match of text.matchAll(/"type"\s*:\s*"message_delta"[^\n]*?"output_tokens"\s*:\s*(\d+)/g)) total += Number(match[1])
-  if (total === 0) {
-    const plain = /^\s*\{[\s\S]*"usage"\s*:\s*\{[^}]*"output_tokens"\s*:\s*(\d+)/.exec(text)
-    if (plain) total = Number(plain[1])
+// Pulls output token counts out of a Messages response. A plain response is
+// parsed, never pattern-matched: its tool inputs are raw JSON the model chose,
+// so they could imitate a stream event. In a stream they only occur as strings.
+export const outputTokensIn = (text: string, streamed: boolean) => {
+  if (streamed) {
+    let total = 0
+    for (const match of text.matchAll(/"type"\s*:\s*"message_delta"[^\n]*?"output_tokens"\s*:\s*(\d+)/g)) total += Number(match[1])
+    return total
   }
-  return total
+  try {
+    const tokens: unknown = JSON.parse(text)?.usage?.output_tokens
+    return typeof tokens === 'number' ? tokens : 0
+  } catch {
+    return 0
+  }
 }
 
 const FORWARDED_HEADERS = ['content-type', 'accept', 'anthropic-version', 'anthropic-beta']
@@ -113,18 +119,19 @@ export const createProxy = ({ apiKey, signingSecret, policy, upstream = 'https:/
     const upstreamRes = await fetch(`${upstream}/v1/messages${url.search === '?beta=true' ? url.search : ''}`, { method: 'POST', headers, body: verdict.body, signal: abort.signal })
 
     res.writeHead(upstreamRes.status, { 'content-type': upstreamRes.headers.get('content-type') ?? 'application/json' })
+    const streamed = upstreamRes.headers.get('content-type')?.includes('event-stream') ?? false
     const decoder = new TextDecoder()
     let seen = ''
     for await (const chunk of upstreamRes.body ?? []) {
       res.write(chunk)
       seen += decoder.decode(chunk, { stream: true })
       const lastBreak = seen.lastIndexOf('\n')
-      if (upstreamRes.headers.get('content-type')?.includes('event-stream') && lastBreak >= 0) {
-        spent.outputTokens += outputTokensIn(seen.slice(0, lastBreak))
+      if (streamed && lastBreak >= 0) {
+        spent.outputTokens += outputTokensIn(seen.slice(0, lastBreak), true)
         seen = seen.slice(lastBreak + 1)
       }
     }
-    spent.outputTokens += outputTokensIn(seen)
+    spent.outputTokens += outputTokensIn(seen, streamed)
     res.end()
     // Upstream error bodies describe what was wrong with the request; they are worth keeping.
     const detail = upstreamRes.ok ? '' : ` error=${seen.replace(/\s+/g, ' ').slice(0, 400)}`

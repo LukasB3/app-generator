@@ -9,6 +9,24 @@ const policy: ProxyPolicy = { models: ['claude-sonnet-5-5'], maxTokens: 1000, ma
 const future = () => Math.floor(Date.now() / 1000) + 600
 const message = (extra: object = {}) => JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 100, messages: [], ...extra })
 
+// The usage block as the API sends it: nested objects come before and after the count.
+const plainResponse = (outputTokens: number) => ({
+  id: 'msg_1',
+  type: 'message',
+  role: 'assistant',
+  content: [{ type: 'text', text: 'ok' }],
+  stop_reason: 'end_turn',
+  usage: {
+    input_tokens: 18,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    output_tokens: outputTokens,
+    output_tokens_details: { thinking_tokens: 0 },
+    service_tier: 'standard',
+  },
+})
+
 describe('job tokens', () => {
   it('round-trips and rejects tampering, expiry and other secrets', () => {
     const token = signJobToken(SECRET, 'abc', future())
@@ -37,11 +55,22 @@ describe('vetRequest', () => {
 })
 
 describe('outputTokensIn', () => {
-  it('reads streamed and plain responses', () => {
+  it('reads streamed responses', () => {
     const stream = 'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{},"usage":{"output_tokens":42}}\n'
-    expect(outputTokensIn(stream)).toBe(42)
-    expect(outputTokensIn('{"id":"x","usage":{"input_tokens":3,"output_tokens":7}}')).toBe(7)
-    expect(outputTokensIn('nothing')).toBe(0)
+    expect(outputTokensIn(stream, true)).toBe(42)
+    expect(outputTokensIn('nothing', true)).toBe(0)
+  })
+
+  it('reads plain responses, whatever else the usage block holds', () => {
+    expect(outputTokensIn(JSON.stringify(plainResponse(7)), false)).toBe(7)
+    expect(outputTokensIn('{"id":"x","usage":{"input_tokens":3,"output_tokens":7}}', false)).toBe(7)
+    expect(outputTokensIn('{"type":"error","error":{"type":"overloaded_error"}}', false)).toBe(0)
+    expect(outputTokensIn('nothing', false)).toBe(0)
+  })
+
+  it('is not fooled by a tool input that imitates a stream event', () => {
+    const forged = { ...plainResponse(900), content: [{ type: 'tool_use', id: 'toolu_1', name: 'Write', input: { type: 'message_delta', usage: { output_tokens: 1 } } }] }
+    expect(outputTokensIn(JSON.stringify(forged), false)).toBe(900)
   })
 })
 
@@ -52,8 +81,11 @@ describe('proxy server', () => {
   const seen: { key: unknown; auth: unknown; cookie: unknown; path: string | undefined }[] = []
 
   beforeAll(async () => {
-    upstream = createServer((req, res) => {
+    upstream = createServer(async (req, res) => {
       seen.push({ key: req.headers['x-api-key'], auth: req.headers.authorization, cookie: req.headers.cookie, path: req.url })
+      let body = ''
+      for await (const chunk of req) body += chunk
+      if (JSON.parse(body).stream === false) return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(plainResponse(600)))
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       res.end('event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":300}}\n\n')
     })
@@ -95,5 +127,15 @@ describe('proxy server', () => {
     const third = await post('/v1/messages', token)
     expect(third.status).toBe(400)
     expect(await third.text()).toContain('budget exhausted')
+  })
+
+  it('counts the output tokens of a response that is not streamed', async () => {
+    const token = signJobToken(SECRET, 'job-d', future())
+    const first = await post('/v1/messages', token, message({ stream: false }))
+    expect(first.status).toBe(200)
+    expect((await first.json()).usage.output_tokens).toBe(600)
+    const second = await post('/v1/messages', token)
+    expect(second.status).toBe(400)
+    expect(await second.text()).toContain('budget exhausted')
   })
 })
