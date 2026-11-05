@@ -47,7 +47,8 @@ export const buildServer = async ({ cfg, store, worker, captcha }: ServerDeps) =
     captchaToken: z.string().min(1).max(4096),
   })
 
-  const view = (job: Job) => ({ id: job.id, status: job.status, position: store.position(job.id), url: job.url, error: job.error })
+  // `now` lets the page line its own clock up with the event timestamps.
+  const view = (job: Job) => ({ id: job.id, status: job.status, position: store.position(job.id), url: job.url, error: job.error, now: Date.now() })
   const hashIp = (ip: string) => createHmac('sha256', cfg.IP_HASH_SECRET).update(clientKey(ip)).digest('hex').slice(0, 32)
   const refuse = (reply: FastifyReply, status: number, error: string) => reply.code(status).send({ error })
 

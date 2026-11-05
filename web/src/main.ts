@@ -14,6 +14,7 @@ interface JobState {
   position: number
   url: string | null
   error: string | null
+  now?: number
 }
 interface Progress {
   seq: number
@@ -47,6 +48,8 @@ let captchaWidget: string | undefined
 let source: EventSource | undefined
 let clock: number | undefined
 let startedAt = 0
+// How far this device's clock runs ahead of the server's.
+let clockAhead = 0
 let busy = false
 let finished = false
 
@@ -100,6 +103,7 @@ const stopClock = () => {
 // "failed" is not a station: the job stops wherever it was.
 let lastStation: Status = 'queued'
 const render = (job: JobState) => {
+  if (job.now) clockAhead = Date.now() - job.now
   if (job.status !== 'failed') lastStation = job.status
   const reached = ORDER.indexOf(lastStation)
   STATIONS.forEach(([status], index) => {
@@ -166,7 +170,7 @@ const watch = (id: string) => {
     if (progress.type === 'status') {
       // The server's start time keeps the clock right after a reload.
       if (progress.data === 'preparing') {
-        startedAt = Math.min(Date.now(), progress.ts)
+        startedAt = Math.min(Date.now(), progress.ts + clockAhead)
         if (clock !== undefined) tick()
       }
       return

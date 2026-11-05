@@ -53,6 +53,7 @@ describe('POST /api/jobs', () => {
     const second = (await submit('a timer', '203.0.113.2')).json()
     const third = (await submit('a clock', '203.0.113.3')).json()
     expect(first.id).toMatch(/^[a-z2-7]{20}$/)
+    expect(Math.abs(Date.now() - first.now)).toBeLessThan(5000)
 
     const state = async (id: string) => (await app.inject({ url: `/api/jobs/${id}` })).json()
     expect(await state(first.id)).toMatchObject({ status: 'coding', position: 0 })
