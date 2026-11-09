@@ -92,6 +92,21 @@ describe('building and changing an app', () => {
     expect(existsSync(join(cfg.DATA_DIR, 'jobs', 'job2'))).toBe(false)
   })
 
+  it('points a page with live data at this server, if it has an address for that', async () => {
+    store.createJob({ id: 'app1', prompt: 'the weather', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
+    agent = (workspace) => {
+      writeFileSync(join(workspace, 'index.html'), page('<p id="now"></p><script src="lib/data.js"></script>'))
+      writeFileSync(join(workspace, 'app.js'), 'data.weather(48.4, 9.99).then((weather) => { document.getElementById("now").textContent = weather.current.temperature })')
+    }
+    await expect(build('app1')).rejects.toThrow(/live data is not available here/)
+
+    cfg = { ...cfg, API_ORIGIN: 'https://api.app-generator.example' }
+    store.createJob({ id: 'app2', prompt: 'the weather', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
+    await build('app2')
+    expect(published[0]!.html).toContain('connect-src https://api.app-generator.example/api/data/;')
+    expect(published[0]!.html).toContain('<meta name="app-generator-data" content="https://api.app-generator.example/api/data/">')
+  })
+
   it('keeps nothing of an app without an owner', async () => {
     store.createJob({ id: 'anon1', prompt: 'a counter', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
     agent = (workspace) => {

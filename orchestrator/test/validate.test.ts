@@ -257,3 +257,51 @@ describe('apps with tables', () => {
     expect(await problemsWith({ ...app, 'notes.txt': `found ${token}` })).toEqual(['notes.txt: contains what looks like a sandbox credential'])
   })
 })
+
+describe('apps with live data', () => {
+  const liveData = 'https://api.example/api/data/'
+  const libs = new Map([...opts.libs, ['db.js', Buffer.from('/* pristine db */')], ['data.js', Buffer.from('/* pristine data */')]])
+  const withData = { ...opts, libs, liveData }
+  const app = { 'index.html': page('<p id="now"></p><script src="lib/data.js"></script><script src="app.js"></script>'), 'app.js': 'data.rates("EUR").then((latest) => { document.getElementById("now").textContent = latest.rates.USD })' }
+
+  it('points a page that loads the data library at the live data routes, lets it reach them and nothing else, and names the sources', async () => {
+    const { files } = await validateWorkspace(await workspace({ ...app, 'about.html': page('<p>About</p>') }), withData)
+    const html = files.get('index.html')!.toString()
+    expect(html).toContain(`content="${CSP.replace("connect-src 'none'", 'connect-src https://api.example/api/data/')}"`)
+    expect(html).toContain('<meta name="app-generator-data" content="https://api.example/api/data/">')
+    expect(html).toContain('AI-generated demo from App Generator. Live data: Open-Meteo.com, ECB via Frankfurter.')
+    expect(html).not.toContain('app-generator-db')
+    expect(files.get('lib/data.js')!.toString()).toBe('/* pristine data */')
+    const about = files.get('about.html')!.toString()
+    expect(about).toContain(`content="${CSP}"`)
+    expect(about).not.toContain('app-generator-data')
+    expect(about).toContain('>AI-generated demo from App Generator<')
+  })
+
+  it('opens both ways, and only those, for a page that shares data and shows live data', async () => {
+    const database = { url: 'https://project.example', key: 'public-key', prefix: 'ajob123_' }
+    const both = page('<script src="lib/db.js"></script><script src="lib/data.js"></script><script src="app.js"></script>')
+    const { files } = await validateWorkspace(await workspace({ ...app, 'index.html': both }), { ...withData, database })
+    const html = files.get('index.html')!.toString()
+    expect(html).toContain('connect-src https://project.example/rest/v1/ https://api.example/api/data/;')
+    expect(html).toContain('AI-generated demo from App Generator. Anything entered here is public. Live data: Open-Meteo.com, ECB via Frankfurter.')
+    expect(html.match(/<meta name="app-generator-(db|data)"/g)).toHaveLength(2)
+  })
+
+  it('drops an address the agent wrote in our name', async () => {
+    const forged = '<meta name="app-generator-data" content="https://evil.example/collect/">'
+    const { files } = await validateWorkspace(await workspace({ ...app, 'index.html': page('<script src="lib/data.js"></script><script src="app.js"></script>', forged) }), withData)
+    const html = files.get('index.html')!.toString()
+    expect(html).not.toContain('evil.example')
+    expect(html.match(/app-generator-data/g)).toHaveLength(1)
+  })
+
+  it('rejects a page that loads the library where there is no live data', async () => {
+    try {
+      await validateWorkspace(await workspace(app), { ...opts, libs })
+      expect.unreachable('should have been rejected')
+    } catch (error) {
+      expect((error as ValidationError).problems).toEqual(['index.html: loads lib/data.js, but live data is not available here. Build the app without it and do not load lib/data.js'])
+    }
+  })
+})

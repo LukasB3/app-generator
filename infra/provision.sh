@@ -42,6 +42,7 @@ if [[ ! -f $etc/orchestrator.env ]]; then
   install -o root -g appgen -m 640 /dev/null "$etc/orchestrator.env"
   cat > "$etc/orchestrator.env" <<EOF
 WEB_ORIGIN=$WEB_ORIGIN
+API_ORIGIN=https://$API_DOMAIN
 TURNSTILE_SECRET=REPLACE_ME
 IP_HASH_SECRET=$(random)
 PROXY_SIGNING_SECRET=$signing

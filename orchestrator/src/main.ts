@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { noAuth, supabaseAuth } from './auth.js'
 import { loadConfig } from './config.js'
+import { createData } from './data.js'
 import { gateway } from './gate.js'
 import { createPipeline } from './pipeline.js'
 import { createAppCleanup } from './publish.js'
@@ -51,7 +52,7 @@ setInterval(() => void purge(), 3_600_000).unref()
 
 const worker = new Worker(store, createPipeline(cfg, store, undefined, undefined, gate))
 const auth = cfg.SUPABASE_URL ? supabaseAuth(cfg.SUPABASE_URL) : noAuth
-const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg), auth })
+const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg), auth, data: createData() })
 
 await app.listen({ host: cfg.HOST, port: cfg.PORT })
 worker.kick()

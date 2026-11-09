@@ -7,6 +7,12 @@ const schema = z.object({
   PORT: z.coerce.number().int().default(8787),
   DATA_DIR: z.string().default('/var/lib/app-generator'),
   WEB_ORIGIN: z.url(),
+  // Where this API is reached from outside. Published apps with live data are
+  // pointed there; without it there is no live data.
+  API_ORIGIN: z
+    .url()
+    .transform((url) => new URL(url).origin)
+    .optional(),
 
   TURNSTILE_SECRET: z.string().min(1),
   IP_HASH_SECRET: secret,
