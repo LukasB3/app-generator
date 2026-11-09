@@ -54,6 +54,8 @@ const walk = async (root: string, problems: string[]) => {
   const visit = async (dir: string, rel: string, depth: number) => {
     for (const name of (await readdir(dir)).sort()) {
       const path = rel ? `${rel}/${name}` : name
+      // The agent's copy of the bundled libraries is never read: they are published from ours.
+      if (path === 'lib') continue
       const stat = await lstat(join(dir, name))
       if (!SEGMENT.test(name)) problems.push(`file name not allowed: ${safeName(path)}`)
       else if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) problems.push(`${path}: only regular files are allowed`)
@@ -195,7 +197,7 @@ const checkScript = (file: string, source: string, problems: string[]) => {
 // phrased so it can be handed back to the agent for one repair attempt.
 export const validateWorkspace = async (root: string, opts: ValidateOptions) => {
   const problems: string[] = []
-  const paths = (await walk(root, problems)).filter((p) => !p.startsWith('lib/'))
+  const paths = await walk(root, problems)
   if (paths.length > LIMITS.files) throw new ValidationError([`too many files (limit ${LIMITS.files})`])
 
   const sources = new Map<string, string>()

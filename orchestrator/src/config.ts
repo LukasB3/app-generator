@@ -18,12 +18,17 @@ const schema = z.object({
   SANDBOX_LAUNCHER: z.string().default('/usr/local/sbin/ag-sandbox'),
   LIBS_DIR: z.string().default('/opt/app-generator/sandbox/libs'),
 
-  JOB_TIMEOUT_S: z.coerce.number().int().default(600),
+  JOB_TIMEOUT_S: z.coerce.number().int().default(900),
   PROMPT_MAX_CHARS: z.coerce.number().int().default(1000),
   QUEUE_MAX: z.coerce.number().int().default(10),
   JOBS_PER_IP_PER_HOUR: z.coerce.number().int().default(3),
   JOBS_PER_HOUR: z.coerce.number().int().default(10),
   JOBS_PER_DAY: z.coerce.number().int().default(30),
+  // What finished jobs may have cost before new ones are turned away. The cap
+  // for a single job is the key proxy's (MAX_COST_USD_PER_JOB).
+  VISITOR_DAILY_BUDGET_USD: z.coerce.number().positive().default(5),
+  DAILY_BUDGET_USD: z.coerce.number().positive().default(10),
+  MONTHLY_BUDGET_USD: z.coerce.number().positive().default(90),
   APP_TTL_H: z.coerce.number().int().positive().default(720),
 
   APPS_REPO: z.string().default('git@github.com:LukasB3/app-generator-apps.git'),

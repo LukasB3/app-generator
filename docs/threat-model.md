@@ -41,7 +41,8 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 
 - The key is not in the container. The agent holds a token of the form `pgj1.<job>.<expiry>.<hmac>` that only the proxy accepts and that expires with the job.
 - If the agent writes that token into the app, the checker rejects the app. Outside the server the token is useless anyway: the proxy listens on the sandbox network and on the host's loopback address (for the prompt screen), and nowhere else.
-- The proxy forwards only `POST /v1/messages`, only for allowed models, with `max_tokens` capped, and stops forwarding once a job has used its request or output-token budget.
+- The proxy forwards only `POST /v1/messages`, only for models it has a price for, with `max_tokens` capped. It counts input, output and cache tokens of every answer, turns them into dollars, and stops forwarding once a job has used its budget in requests, output tokens or dollars.
+- An answer that ends without its final token count is charged as if it had run in full, so hanging up early is no way around the budget.
 - The proxy refuses requests that declare server-side tools or MCP servers. Without this, code running in the container could ask Anthropic's servers to fetch URLs on its behalf.
 - The proxy forwards four request headers and nothing else, and is built from Node built-ins only.
 
@@ -71,7 +72,8 @@ The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'n
 
 - Turnstile in front of job creation, verified on the server.
 - Three jobs per visitor per hour (IPv6 visitors are counted per /64), ten per hour and thirty per day overall, a queue of ten.
-- One job at a time, each with a hard timeout and a token budget.
+- One job at a time, each with a hard timeout and a budget in tokens and dollars.
+- The orchestrator stores what each job cost, as the proxy counted it, and turns new jobs away once a visitor's day, the day or the last 30 days have used their budget. The cost of a job is known when it ends, so jobs already waiting can overshoot a budget, each by at most the cap for one job.
 - A prompt screen in front of the queue. After the captcha and the limits, the orchestrator asks a small model (Claude Haiku 5.5) whether the text is a request for an app, gibberish, or abusive, and turns the last two away with a fixed message. The call goes through the key proxy with a 30-second job token, so the orchestrator still never holds the API key and the proxy's vetting and logging apply.
 - The screen is not a security control and nothing depends on it. The visitor's text is passed as data, the answer is constrained to three fixed values, and a prompt that talks the model into "ok" gets what every prompt gets: the sandbox and the checker. If the call fails or times out, the request is let through.
 - A screened-out prompt costs one small model call and no job. Each attempt needs a fresh captcha and the route accepts ten requests per visitor per minute.

@@ -101,6 +101,36 @@ describe('POST /api/jobs', () => {
     expect((await submit('another app', '203.0.113.9')).json().error).toMatch(/capacity/)
   })
 
+  it('turns visitors away once finished jobs have used up a budget', async () => {
+    await setup(gated)
+    const first = (await submit()).json()
+    store.setCost(first.id, cfg.VISITOR_DAILY_BUDGET_USD * 1e6)
+    expect((await submit()).json().error).toMatch(/limit for today/)
+    expect((await submit('another app', '203.0.113.9')).statusCode).toBe(202)
+
+    store.setCost(first.id, cfg.DAILY_BUDGET_USD * 1e6)
+    expect((await submit('another app', '203.0.113.10')).json().error).toMatch(/capacity/)
+
+    await app.close()
+    await setup(gated)
+    const day = 24 * 3_600_000
+    store.createJob('tendaysago', 'an earlier request', 'h', Date.now() + day, Date.now() - 10 * day)
+    store.setCost('tendaysago', cfg.MONTHLY_BUDGET_USD * 1e6 - 1)
+    expect((await submit()).statusCode).toBe(202)
+    store.setCost('tendaysago', cfg.MONTHLY_BUDGET_USD * 1e6)
+    expect((await submit('another app', '203.0.113.9')).json().error).toMatch(/capacity/)
+  })
+
+  it('records what the pipeline reports as the cost of a job', async () => {
+    await setup(async (_job, report) => {
+      report.cost(1234.2)
+      return 'https://apps.example/apps/x/'
+    })
+    const { id } = (await submit()).json()
+    await expect.poll(() => store.getJob(id)!.status).toBe('done')
+    expect(store.costSince(0)).toBe(1235)
+  })
+
   it('turns away nonsense and abusive prompts without queueing or using up the hourly limit', async () => {
     const screened: string[] = []
     await setup(gated, {}, async (prompt, jobId) => {

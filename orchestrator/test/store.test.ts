@@ -57,8 +57,9 @@ describe('schema migrations', () => {
 
     store.createJob('fresh1', 'a new request', 'h', Date.now() + DAY)
     expect(store.getJob('fresh1')!.appId).toBe('fresh1')
+    expect(store.costSince(0)).toBe(0)
     store.close()
-    expect(version()).toBe(2)
+    expect(version()).toBe(3)
   })
 
   it('keeps a copy of the old file and removes it with the records it mirrors', () => {
@@ -93,9 +94,26 @@ describe('schema migrations', () => {
     expect(version()).toBe(1)
   })
 
+  it('adds up what jobs cost, for everyone or for one visitor', () => {
+    const store = new Store(path)
+    const now = Date.now()
+    store.createJob('a', 'first', 'alice', now + DAY, now - 2 * DAY)
+    store.createJob('b', 'second', 'alice', now + DAY)
+    store.createJob('c', 'third', 'bob', now + DAY)
+    store.setCost('a', 700_000)
+    store.setCost('b', 250_000.4)
+    store.setCost('c', 50_000)
+
+    expect(store.costSince(0)).toBe(1_000_001)
+    expect(store.costSince(now - DAY)).toBe(300_001)
+    expect(store.costSince(now - DAY, 'alice')).toBe(250_001)
+    expect(store.costSince(now - DAY, 'nobody')).toBe(0)
+    store.close()
+  })
+
   it('leaves an up-to-date file alone and makes no copy of an empty one', () => {
     new Store(path).close()
-    expect(version()).toBe(2)
+    expect(version()).toBe(3)
     expect(existsSync(`${path}.bak`)).toBe(false)
 
     const store = new Store(path)

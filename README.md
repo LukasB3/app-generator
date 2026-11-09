@@ -34,13 +34,13 @@ flowchart LR
 | --- | --- |
 | Agent runs commands or reaches the network | No shell or web tools (`--restricted`, fixed tool list baked into the image). Container: non-root, read-only root filesystem, all capabilities dropped, memory, CPU and process limits. Its network is internal with no gateway on the host, so the only reachable address is the key proxy. |
 | Agent steals the API key | The key exists only in the proxy's environment. The container gets an HMAC-signed token bound to the job id and the job deadline. |
-| Agent abuses the API through the proxy | Only `POST /v1/messages` is forwarded. Model allow-list, `max_tokens` cap, request and output-token budget per job. Requests that carry server tools (web search, web fetch, code execution) or MCP servers are refused, since those would give the sandbox a way out through Anthropic's side. |
+| Agent abuses the API through the proxy | Only `POST /v1/messages` is forwarded. Model allow-list, `max_tokens` cap, and a budget per job in requests, output tokens and dollars: the proxy meters every kind of token against a price table, and charges an answer that is cut short as if it had run in full. Requests that carry server tools (web search, web fetch, code execution) or MCP servers are refused, since those would give the sandbox a way out through Anthropic's side. |
 | Web-facing process gets compromised | The orchestrator has no Docker access. It can only ask a root-owned launcher to start or kill the container for a job id; image, network, limits and mounts are fixed there. |
 | Agent gets at git or GitHub | The image has no git and no credentials. The orchestrator publishes with a deploy key that is valid for the apps repository only. |
 | Malicious output is published | The checker allows only `.html`, `.css`, `.js`, `.json` and `.txt` within size and count limits, rejects symlinks, secrets, inline scripts, external or absolute URLs, iframes, password and card fields, and forms that submit anywhere. HTML is re-serialised with a strict CSP (`connect-src 'none'`, `form-action 'none'`, `script-src 'self'`) and a visible "AI-generated" badge. |
 | Injection through the prompt | The prompt reaches the agent on stdin only. Job ids are generated server-side and are the only request-derived value in any path or command. Every subprocess is started with an argument array, never through a shell. |
 | Nonsense or abusive requests | One short classification call (Claude Haiku 5.5, through the key proxy with a job token) before a job is queued. It is a courtesy filter, not a boundary: its answer is one of three fixed values, and a prompt that fools it only reaches the sandbox and the checker like any other. If the call fails, the request goes through. |
-| Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container, and a spend limit on the dedicated Anthropic workspace. |
+| Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
 The full reasoning, including the trade-offs that remain, is in [docs/threat-model.md](docs/threat-model.md).
 
@@ -89,10 +89,15 @@ The website is a Vercel project with `web/` as its root directory and `VITE_API_
 | Setting | Default |
 | --- | --- |
 | Jobs running at once | 1 |
-| Job timeout | 10 minutes |
-| Jobs per visitor | 3 per hour |
-| Jobs overall | 10 per hour, 30 per day |
+| Job timeout | 15 minutes |
+| Job budget | 120 requests, 250,000 output tokens, $4 |
+| Jobs per visitor | 3 per hour, $5 per day |
+| Jobs overall | 10 per hour, 30 per day, $10 per day, $90 per 30 days |
 | Queue length | 10 |
 | Prompt length | 1,000 characters |
 | App size | 30 files, 300 kB per file, 1.5 MB in total |
 | App lifetime | 30 days, then removed from the apps repository |
+
+Dollar budgets count what finished jobs have cost, so jobs that are still waiting or running can take a total past its budget, each by at most the cap for one job.
+
+Generated apps can load three bundled libraries and nothing else from outside their own files: a QR code generator, Chart.js, and Preact with htm. They are listed with versions and checksums in [sandbox/libs/README.md](sandbox/libs/README.md).

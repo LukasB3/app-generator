@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -64,6 +64,29 @@ describe('accepted apps', () => {
     expect(used.get('lib/qrcode.js')!.toString()).toBe('/* pristine */')
     const unused = await validateWorkspace(await workspace({ 'index.html': page('hi'), 'lib/qrcode.js': 'x' }), opts)
     expect(unused.has('lib/qrcode.js')).toBe(false)
+  })
+
+  it('does not count or read the library folder in the workspace', async () => {
+    const files: Record<string, string> = { 'index.html': page('x'), 'lib/chart.js': 'x'.repeat(LIMITS.fileBytes + 1), 'lib/odd name!.js': 'x', 'lib/deep/er/still/x.js': 'x' }
+    for (let i = 1; i < LIMITS.files; i++) files[`f${i}.txt`] = 'x'
+    const out = await validateWorkspace(await workspace(files), opts)
+    expect(out.size).toBe(LIMITS.files)
+    expect([...out.keys()].some((path) => path.startsWith('lib/'))).toBe(false)
+  })
+
+  it('ships the real bundled libraries to an app that uses them', async () => {
+    const libsDir = join(import.meta.dirname, '../../sandbox/libs')
+    const libs = new Map(await Promise.all((await readdir(libsDir)).filter((name) => name.endsWith('.js')).map(async (name) => [name, await readFile(join(libsDir, name))] as const)))
+    const out = await validateWorkspace(
+      await workspace({
+        'index.html': page('<canvas id="chart"></canvas><div id="app"></div><script src="lib/chart.js"></script><script src="lib/preact.js"></script><script src="app.js"></script>'),
+        'app.js': 'const { html, render } = htmPreact; render(html`<p>hi</p>`, document.getElementById("app")); new Chart(document.getElementById("chart"), { type: "bar", data: { labels: ["a"], datasets: [{ data: [1] }] } })',
+      }),
+      { ...opts, libs },
+    )
+    expect([...out.keys()].sort()).toEqual(['app.js', 'index.html', 'lib/chart.js', 'lib/preact.js'])
+    expect(out.get('lib/chart.js')!.toString()).toContain('Chart.js v4.5.1')
+    expect(out.get('lib/preact.js')!.toString()).toContain('htmPreact')
   })
 })
 

@@ -29,7 +29,7 @@ export class Worker extends EventEmitter {
       this.emit('queue')
     }
 
-    this.pipeline(job, { status, file: add('file'), note: add('note') })
+    this.pipeline(job, { status, file: add('file'), note: add('note'), cost: (microUsd) => this.store.setCost(job.id, microUsd) })
       .then((url) => status('done', { url }))
       .catch((error: unknown) => {
         this.log(`job ${job.id} failed`, error)
