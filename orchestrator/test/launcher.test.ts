@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { signJobToken } from '../src/token.js'
+import { signGateToken, signJobToken } from '../src/token.js'
 
 // Exercises the real launcher script with a stand-in for the docker binary.
 const LAUNCHER = join(import.meta.dirname, '../../infra/ag-sandbox')
@@ -11,6 +11,8 @@ const SECRET = 's'.repeat(32)
 const ID = 'abcdefghij234567abcd'
 const OTHER = 'zzzzzzzzzzzzzzzzzzzz'
 const token = (id = ID) => signJobToken(SECRET, id, 2_000_000_000)
+const APP = 'appappappappappappap'
+const gate = (id = ID, app = APP) => signGateToken(SECRET, app, id, 2_000_000_000)
 
 let dir: string
 const out = (name: string) => readFileSync(join(dir, name), 'utf8')
@@ -18,7 +20,7 @@ const out = (name: string) => readFileSync(join(dir, name), 'utf8')
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ag-launcher-'))
   mkdirSync(join(dir, 'jobs', ID), { recursive: true })
-  writeFileSync(join(dir, 'docker'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${dir}/args"\nprintf '%s' "$ANTHROPIC_API_KEY" > "${dir}/key"\ncat > "${dir}/stdin"\n`)
+  writeFileSync(join(dir, 'docker'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${dir}/args"\nprintf '%s' "$ANTHROPIC_API_KEY" > "${dir}/key"\nprintf '%s' "$AG_DB_TOKEN" > "${dir}/dbkey"\ncat > "${dir}/stdin"\n`)
   chmodSync(join(dir, 'docker'), 0o755)
   writeFileSync(
     join(dir, 'sandbox.conf'),
@@ -31,8 +33,8 @@ const launch = (args: string[], input = '') =>
   spawnSync(LAUNCHER, args, { input, encoding: 'utf8', env: { PATH: process.env.PATH, PG_DOCKER: join(dir, 'docker'), PG_SANDBOX_CONF: join(dir, 'sandbox.conf') } })
 
 describe('ag-sandbox run', () => {
-  it('starts a locked-down container and keeps the token off the command line', () => {
-    const result = launch(['run', ID], `${token()}\nBuild a clock\nsecond line`)
+  it('starts a locked-down container and keeps the tokens off the command line', () => {
+    const result = launch(['run', ID], `${token()}\n${gate()}\nBuild a clock\nsecond line`)
     expect(result.status).toBe(0)
     const args = out('args').split('\n').join(' ')
     for (const flag of [
@@ -46,14 +48,23 @@ describe('ag-sandbox run', () => {
       '--cpus 1.5',
       `--user ${userInfo().uid}:${userInfo().gid}`,
       `source=${dir}/jobs/${ID},target=/workspace`,
-      '--env ANTHROPIC_API_KEY --env',
+      '--env ANTHROPIC_API_KEY --env AG_DB_TOKEN --env',
       '--rm',
     ])
       expect(args).toContain(flag)
-    expect(args).not.toMatch(/privileged|docker\.sock|--network host|pgj1\./)
+    expect(args).not.toMatch(/privileged|docker\.sock|--network host|pgj1\.|agd1\./)
     expect(args.trim().endsWith('ag-sandbox:latest')).toBe(true)
     expect(out('key')).toBe(token())
+    expect(out('dbkey')).toBe(gate())
     expect(out('stdin')).toBe('Build a clock\nsecond line')
+  })
+
+  it('takes "-" where there is no database, and a first build whose app has the id of its job', () => {
+    expect(launch(['run', ID], `${token()}\n-\nBuild a clock`).status).toBe(0)
+    expect(out('dbkey')).toBe('-')
+    expect(out('stdin')).toBe('Build a clock')
+    expect(launch(['run', ID], `${token()}\n${gate(ID, ID)}\nBuild a clock`).status).toBe(0)
+    expect(out('dbkey')).toBe(gate(ID, ID))
   })
 
   it.each([
@@ -67,14 +78,27 @@ describe('ag-sandbox run', () => {
     ['no token', ['run', ID], ''],
     ['a job without workspace', ['run', OTHER], token(OTHER)],
   ])('refuses %s', (_name, args, input) => {
-    const result = launch(args, `${input}\nprompt`)
+    const result = launch(args, `${input}\n-\nprompt`)
+    expect(result.status).toBe(64)
+    expect(existsSync(join(dir, 'args'))).toBe(false)
+  })
+
+  it.each([
+    ['no database token line', ''],
+    ['a prompt where the database token belongs', 'Build a clock'],
+    ['a database token for another job', gate(OTHER)],
+    ['a database token whose app, not job, is this one', gate(OTHER, ID)],
+    ['a job token as database token', token()],
+    ['a database token with something after it', `${gate()} --privileged`],
+  ])('refuses %s', (_name, second) => {
+    const result = launch(['run', ID], `${token()}\n${second}`)
     expect(result.status).toBe(64)
     expect(existsSync(join(dir, 'args'))).toBe(false)
   })
 
   it('refuses a workspace that is a symlink', () => {
     symlinkSync('/etc', join(dir, 'jobs', OTHER))
-    expect(launch(['run', OTHER], `${token(OTHER)}\nprompt`).status).toBe(64)
+    expect(launch(['run', OTHER], `${token(OTHER)}\n-\nprompt`).status).toBe(64)
     expect(existsSync(join(dir, 'args'))).toBe(false)
   })
 })

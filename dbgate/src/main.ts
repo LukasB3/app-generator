@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import pg from 'pg'
 import { createGate } from './db.js'
+import { createMcp } from './mcp.js'
 import { createServer } from './server.js'
 
 const env = (name: string, fallback?: string) => {
@@ -32,7 +33,7 @@ const pool = new pg.Pool({
 pool.on('error', (error) => console.log(`idle connection lost: ${error.message}`))
 
 const gate = createGate(pool)
-const server = createServer({ gate, signingSecret })
+const server = createServer({ gate, mcp: createMcp(gate), signingSecret })
 
 server.listen(Number(env('PORT', '8080')), '0.0.0.0', () => console.log('database gateway listening'))
 gate.ready().catch((error: Error) => console.log(`not ready: ${error.message}`))

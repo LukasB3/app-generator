@@ -1,13 +1,16 @@
 import type { Pool, PoolClient } from 'pg'
-import { APP_ID, LIMITS, Refused, TYPES, ident, plan, prefixOf, type ColumnType, type Limits, type Table } from './schema.js'
+import { APP_ID, LIMITS, OWN_COLUMNS, Refused, TYPES, ident, plan, prefixOf, type ColumnType, type Limits, type Table } from './schema.js'
 
 // The gateway cannot do its work right now: the database is out of reach, the
 // setup script has not run, or the role failed the self-test below.
 export class NotReady extends Error {}
 
 export interface Gate {
+  limits: Limits
   ready(): Promise<void>
   tables(appId: string): Promise<Table[]>
+  // An app's tables, and how many tables all apps have together.
+  state(appId: string): Promise<{ tables: Table[]; overall: number }>
   commit(appId: string, changes: unknown): Promise<Table[]>
   sweep(keep: unknown): Promise<string[]>
 }
@@ -61,9 +64,9 @@ const tablesOf = async (db: Db, appId: string): Promise<Table[]> => {
   const { rows } = await db.query(
     `select substr(c.relname, $2) as name, has_table_privilege('anon', c.oid, 'delete') as shared,
        array(select array[a.attname::text, format_type(a.atttypid, a.atttypmod)] from pg_attribute a
-         where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped and a.attname not in ('id', 'created_at') order by a.attnum) as columns
+         where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped and a.attname <> all ($3) order by a.attnum) as columns
      from pg_class c where ${OWN} and left(c.relname, $2 - 1) = $1 order by c.oid`,
-    [prefix, prefix.length + 1],
+    [prefix, prefix.length + 1, OWN_COLUMNS],
   )
   return rows.map(({ name, shared, columns }: { name: string; shared: boolean; columns: [string, string][] }) => ({
     name,
@@ -76,14 +79,21 @@ const tablesOf = async (db: Db, appId: string): Promise<Table[]> => {
   }))
 }
 
-export const createGate = (pool: Pool, { limits = LIMITS, log = console.log }: { limits?: Limits; log?: (line: string) => void } = {}): Gate => {
+const RETRY_AFTER_MS = 30_000
+
+export const createGate = (pool: Pool, { limits = LIMITS, log = console.log, now = Date.now }: { limits?: Limits; log?: (line: string) => void; now?: () => number } = {}): Gate => {
   // Not known until the database could be asked. Once the role has failed the test, it stays failed until a restart.
   let verdict: string | undefined
+  // A database that is out of reach is not asked again for a while. Callers
+  // get their answer at once, instead of each waiting for a connection to time out.
+  let unreachable: { since: number; reason: string } | undefined
 
   const ready = async () => {
     if (verdict === undefined) {
+      if (unreachable && now() - unreachable.since < RETRY_AFTER_MS) throw new NotReady(unreachable.reason)
       const { rows } = await pool.query<SelfTest>(SELF_TEST).catch((error: Error) => {
-        throw new NotReady(`the database is out of reach or not set up: ${error.message}`)
+        unreachable = { since: now(), reason: `the database is out of reach or not set up: ${error.message}` }
+        throw new NotReady(unreachable.reason)
       })
       verdict = faultsIn(rows[0]!).join('; ')
       log(verdict ? `self-test failed, refusing to work. The database role is not what it should be: ${verdict}` : 'self-test passed')
@@ -113,7 +123,10 @@ export const createGate = (pool: Pool, { limits = LIMITS, log = console.log }: {
     }
   }
 
+  const overallIn = async (db: Db) => (await db.query<{ n: number }>(`select count(*)::int as n from pg_class c where ${OWN}`)).rows[0]!.n
+
   return {
+    limits,
     ready,
 
     tables: async (appId) => {
@@ -121,12 +134,16 @@ export const createGate = (pool: Pool, { limits = LIMITS, log = console.log }: {
       return tablesOf(pool, appId)
     },
 
+    state: async (appId) => {
+      await ready()
+      return { tables: await tablesOf(pool, appId), overall: await overallIn(pool) }
+    },
+
     // All of an app's changes take effect together or not at all.
     commit: (appId, changes) =>
       transaction(async (db) => {
         const existing = await tablesOf(db, appId)
-        const overall = (await db.query<{ n: number }>(`select count(*)::int as n from pg_class c where ${OWN}`)).rows[0]!.n
-        const { tables, statements } = plan(appId, existing, changes, overall, limits)
+        const { tables, statements } = plan(appId, existing, changes, await overallIn(db), limits)
         for (const statement of statements) await db.query(statement)
         return tables
       }),

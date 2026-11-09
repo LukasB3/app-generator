@@ -21,8 +21,8 @@
           <dd>A small model reads each request before it is queued and turns away gibberish and abusive text. Nothing below relies on it getting that right.</dd>
         </div>
         <div>
-          <dt>The agent can only write files</dt>
-          <dd>It runs in a throwaway container with no shell, no git and no route to the internet. The container is deleted after every job.</dd>
+          <dt>The agent can write files and ask for tables</dt>
+          <dd>It runs in a throwaway container with no shell, no git and no route to the internet. For an app that shares data it can ask for tables in a database. The container is deleted after every job.</dd>
         </div>
         <div>
           <dt>It never holds a real key</dt>
@@ -33,8 +33,16 @@
           <dd>A checker with no AI in it inspects every file: allowed types, size limits, no secrets, no outside scripts, no forms that send data anywhere.</dd>
         </div>
         <div>
+          <dt>Nothing is created before the check</dt>
+          <dd>A wish for a table is only written down. The tables are created after the app has passed the checker, by code that builds every database statement itself.</dd>
+        </div>
+        <div>
           <dt>Published apps are boxed in</dt>
-          <dd>Each page carries a policy that stops it from loading or contacting anything outside its own folder, and a badge marking it as generated.</dd>
+          <dd>Each page carries a policy that stops it from loading or contacting anything outside its own folder, and a badge marking it as generated. An app that shares data may reach its tables and nothing else.</dd>
+        </div>
+        <div>
+          <dt>Shared data is public, and says so</dt>
+          <dd>What visitors enter into such an app can be read by everyone, and the page tells them. A table stops at 500 small rows and is deleted together with its app.</dd>
         </div>
         <div>
           <dt>Publishing is a separate, narrow step</dt>

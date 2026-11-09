@@ -4,7 +4,8 @@
 # socket. It accepts an action and a job id; every other detail of the
 # container is fixed here and in the root-owned config file.
 #
-#   ag-sandbox run <job-id>    first stdin line: job token, rest: prompt
+#   ag-sandbox run <job-id>    stdin: the job token, then the job's token for
+#                              the database tools or "-", then the prompt
 #   ag-sandbox kill <job-id>
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -37,6 +38,9 @@ kill)
 run)
   IFS= read -r token || die "missing token"
   [[ $token =~ ^pgj1\.[a-z2-7]{20}\.[0-9]{1,12}\.[a-f0-9]{64}$ && $token == "pgj1.$id."* ]] || die "invalid token"
+  # Without a database the orchestrator sends "-", which opens nothing.
+  IFS= read -r gate || die "missing database token"
+  [[ $gate == - || $gate =~ ^agd1\.[a-z2-7]{20}\.$id\.[0-9]{1,12}\.[a-f0-9]{64}$ ]] || die "invalid database token"
 
   workspace=$JOBS_DIR/$id
   [[ -d $workspace && ! -L $workspace ]] || die "workspace missing"
@@ -44,8 +48,9 @@ run)
   gid=$(id -g "$RUN_AS")
   [[ $(stat -c %u "$workspace") == "$uid" ]] || die "workspace has the wrong owner"
 
-  # Passed by name below, so the token never appears on a command line.
+  # Passed by name below, so the tokens never appear on a command line.
   export ANTHROPIC_API_KEY=$token
+  export AG_DB_TOKEN=$gate
   exec "$docker" run --rm -i \
     --name "ag-job-$id" \
     --network "$NETWORK" \
@@ -65,6 +70,7 @@ run)
     --env HOME=/home/agent \
     --env "ANTHROPIC_BASE_URL=$PROXY_URL" \
     --env ANTHROPIC_API_KEY \
+    --env AG_DB_TOKEN \
     --env "ANTHROPIC_MODEL=$MODEL" \
     "$IMAGE"
   ;;

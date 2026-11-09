@@ -19,7 +19,7 @@ describe('plan', () => {
     expect(tables).toEqual([{ name: 'entries', mode: 'append', columns: [{ name: 'author', type: 'text' }, { name: 'stars', type: 'integer' }] }])
     expect(statements).toMatchInlineSnapshot(`
       [
-        "create table apps."aabcdefghij234567abcd_entries" (id bigint generated always as identity primary key, created_at timestamp with time zone not null default now(), "author" text, "stars" integer)",
+        "create table apps."aabcdefghij234567abcd_entries" (id bigint generated always as identity primary key, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), "author" text, "stars" integer)",
         "alter table apps."aabcdefghij234567abcd_entries" enable row level security",
         "create trigger cap before insert or update on apps."aabcdefghij234567abcd_entries" for each row execute function gate.cap()",
         "grant select on apps."aabcdefghij234567abcd_entries" to anon",
@@ -60,6 +60,14 @@ describe('plan', () => {
     expect(existing.map((table) => table.columns.length)).toEqual([1, 1])
   })
 
+  it('hands the changes back with nothing in them but what was checked', () => {
+    const { changes } = plan(APP, [], [{ ...guestbook, extra: 'x', columns: [{ name: 'author', type: 'text', comment: 'y' }] }, { action: 'add_column', table: 'entries', column: { name: 'note', type: 'text', z: 1 }, more: true }], 0)
+    expect(changes).toEqual([
+      { action: 'create_table', table: 'entries', mode: 'append', columns: [{ name: 'author', type: 'text' }] },
+      { action: 'add_column', table: 'entries', column: { name: 'note', type: 'text' } },
+    ])
+  })
+
   it('lets a later change build on an earlier one', () => {
     const { tables } = plan(APP, [], [guestbook, { action: 'add_column', table: 'entries', column: { name: 'note', type: 'text' } }], 0)
     expect(tables[0]!.columns.map((column) => column.name)).toEqual(['author', 'stars', 'note'])
@@ -71,7 +79,7 @@ describe('plan', () => {
   })
 
   it('refuses column names that are taken or that the Data API reads as parameters', () => {
-    for (const name of ['id', 'created_at', 'select', 'order', 'limit', 'offset', 'columns', 'on_conflict', 'and', 'or', 'not']) expect(refusal([{ ...guestbook, columns: [{ name, type: 'text' }] }])).toMatch(/^A column cannot be called/)
+    for (const name of ['id', 'created_at', 'updated_at', 'select', 'order', 'limit', 'offset', 'columns', 'on_conflict', 'and', 'or', 'not']) expect(refusal([{ ...guestbook, columns: [{ name, type: 'text' }] }])).toMatch(/^A column cannot be called/)
     expect(refusal([{ ...guestbook, columns: [{ name: 'a', type: 'text' }, { name: 'a', type: 'date' }] }])).toMatch(/has a column "a" already/)
     expect(refusal([guestbook, { action: 'add_column', table: 'entries', column: { name: 'author', type: 'text' } }])).toMatch(/has a column "author" already/)
   })

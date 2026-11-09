@@ -27,6 +27,9 @@ export interface Table {
   mode: Mode
   columns: Column[]
 }
+// What an app asks for. Tables are only ever added to, so a build that fails
+// later leaves nothing behind that a running version of the app could miss.
+export type Change = { action: 'create_table'; table: string; mode: Mode; columns: Column[] } | { action: 'add_column'; table: string; column: Column }
 
 // The caps on rows per table and bytes per row are in gate.cap(), in
 // infra/supabase-setup.sql: the database enforces them on every write.
@@ -36,7 +39,9 @@ export interface Limits {
   tablesOverall: number
 }
 export const LIMITS: Limits = { tablesPerApp: 3, columnsPerTable: 12, tablesOverall: 150 }
-const MAX_CHANGES = 40
+export const MAX_CHANGES = 40
+// The columns every table gets. `updated_at` is what a page asks for to learn whether anything changed.
+export const OWN_COLUMNS = ['id', 'created_at', 'updated_at']
 
 // A request the gateway turns down. The message is a fixed sentence, fit to be
 // shown to whoever asked; it never repeats input that failed a check.
@@ -45,9 +50,9 @@ export class Refused extends Error {}
 export const APP_ID = /^[a-z2-7]{20}$/
 const NAME = /^[a-z][a-z0-9_]{0,29}$/
 const NAME_RULE = 'start with a lowercase letter and hold only lowercase letters, digits and underscores, 30 characters at most'
-// The columns every table gets, and the words the Data API reads as query
+// Besides the gateway's own columns, the words the Data API reads as query
 // parameters, which a column of the same name could never be filtered by.
-const RESERVED = new Set(['id', 'created_at', 'select', 'order', 'limit', 'offset', 'columns', 'on_conflict', 'and', 'or', 'not'])
+const RESERVED = new Set([...OWN_COLUMNS, 'select', 'order', 'limit', 'offset', 'columns', 'on_conflict', 'and', 'or', 'not'])
 
 // Every identifier in a statement passes through here, whatever checked it before.
 export const ident = (name: string) => {
@@ -63,13 +68,13 @@ const createTable = (appId: string, { name, mode, columns }: Table) => {
   const table = qualified(appId, name)
   const names = columns.map((column) => ident(column.name)).join(', ')
   return [
-    `create table ${table} (id bigint generated always as identity primary key, created_at timestamp with time zone not null default now(), ${columns.map((column) => `${ident(column.name)} ${TYPES[column.type]}`).join(', ')})`,
+    `create table ${table} (id bigint generated always as identity primary key, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), ${columns.map((column) => `${ident(column.name)} ${TYPES[column.type]}`).join(', ')})`,
     // Without a policy nobody but the owner gets at a row, so each right below is given twice: as a grant and as a policy.
     `alter table ${table} enable row level security`,
     `create trigger cap before insert or update on ${table} for each row execute function gate.cap()`,
     `grant select on ${table} to anon`,
     `create policy anon_select on ${table} for select to anon using (true)`,
-    // Visitors fill the app's own columns only: never the id, never the time a row was made.
+    // Visitors fill the app's own columns only: never the id, never the times a row was made or changed.
     `grant insert (${names}) on ${table} to anon`,
     `create policy anon_insert on ${table} for insert to anon with check (true)`,
     ...(mode === 'shared'
@@ -103,7 +108,7 @@ const tableNameIn = (value: unknown) => {
 const columnIn = (value: unknown, taken: Column[]): Column => {
   const { name, type } = record(value)
   if (typeof name !== 'string' || !NAME.test(name)) throw new Refused(`Column names ${NAME_RULE}.`)
-  if (RESERVED.has(name)) throw new Refused(`A column cannot be called "${name}". Every table has "id" and "created_at" already, and the other reserved names are ${[...RESERVED].slice(2).join(', ')}.`)
+  if (RESERVED.has(name)) throw new Refused(`A column cannot be called "${name}". Every table has ${OWN_COLUMNS.join(', ')} already, and the other reserved names are ${[...RESERVED].slice(OWN_COLUMNS.length).join(', ')}.`)
   if (taken.some((column) => column.name === name)) throw new Refused(`The table has a column "${name}" already.`)
   if (typeof type !== 'string' || !Object.hasOwn(TYPES, type)) throw new Refused(`A column's type is one of ${Object.keys(TYPES).join(', ')}.`)
   return { name, type: type as ColumnType }
@@ -118,6 +123,8 @@ export const plan = (appId: string, existing: Table[], changes: unknown, tablesO
 
   const tables = existing.map((table) => ({ ...table, columns: [...table.columns] }))
   const statements: string[] = []
+  // The changes again, holding nothing but what was checked.
+  const checked: Change[] = []
   for (const raw of changes) {
     const change = record(raw)
     const name = tableNameIn(change.table)
@@ -135,15 +142,17 @@ export const plan = (appId: string, existing: Table[], changes: unknown, tablesO
       const table: Table = { name, mode: mode as Mode, columns }
       tables.push(table)
       statements.push(...createTable(appId, table))
+      checked.push({ action: 'create_table', table: name, mode: table.mode, columns: [...columns] })
     } else if (change.action === 'add_column') {
       if (!found) throw new Refused(`There is no table "${name}".`)
       if (found.columns.length >= limits.columnsPerTable) throw new Refused(`A table can have ${limits.columnsPerTable} columns of its own at most.`)
       const column = columnIn(change.column, found.columns)
       found.columns.push(column)
       statements.push(...addColumn(appId, found, column))
+      checked.push({ action: 'add_column', table: name, column })
     } else {
       throw new Refused('A change\'s action is either "create_table" or "add_column".')
     }
   }
-  return { tables, statements }
+  return { tables, statements, changes: checked }
 }

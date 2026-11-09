@@ -47,10 +47,13 @@ grant usage on schema gate to ag_gate;
 -- and a table 500 rows. Whoever writes to such a table has the public key and
 -- nothing else, so these caps are what bounds the space an app can take.
 -- The function runs with the rights of the writer; it does not need more.
+-- It also stamps each row with the time of the write, which is how an open
+-- page notices that something changed without reading the whole table.
 create or replace function gate.cap() returns trigger language plpgsql set search_path = '' as $$
 declare
   n bigint;
 begin
+  new.updated_at := clock_timestamp();
   if octet_length(new::text) > 2048 then
     raise exception 'row too large';
   end if;

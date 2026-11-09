@@ -1,6 +1,6 @@
 # Long-running containers and the two networks. Job containers are started by
 # the orchestrator and join `ag-sandbox`, which has no route to the internet:
-# the key proxy is the only thing they can reach.
+# the key proxy and the database gateway are the only things they can reach.
 name: app-generator
 
 services:
@@ -25,9 +25,9 @@ services:
     ports: ['127.0.0.1:8788:8080']
 
   # Creates and removes the tables of generated apps. It holds the only
-  # database credential on this server, for a role that can do nothing else.
-  # Only the orchestrator talks to it so far, over host loopback: it is not on
-  # the sandbox network.
+  # database credential on this server. Job containers reach its tools, which
+  # only write down what an agent asks for; the orchestrator reaches the rest
+  # over host loopback.
   dbgate:
     build: ../dbgate
     image: ag-dbgate:latest
@@ -45,7 +45,7 @@ services:
     security_opt: ['no-new-privileges:true']
     pids_limit: 128
     mem_limit: 256m
-    networks: [egress]
+    networks: [sandbox, egress]
     ports: ['127.0.0.1:8789:8080']
 
   sandbox:
