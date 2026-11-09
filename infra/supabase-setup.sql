@@ -69,3 +69,33 @@ begin
 end $$;
 revoke all on function gate.cap() from public;
 grant execute on function gate.cap() to ag_gate;
+
+-- Accounts that nobody uses any more are deleted, once a day. An account
+-- counts as unused when its last login is more than 90 days ago and none of
+-- its sessions has been renewed since; a page that is open renews its session
+-- by itself. Nothing else is left of such an account by then: its apps lived
+-- ten days at most. Deleting the account takes its logins and sessions with it.
+create or replace function gate.forget_unused_accounts() returns integer language sql set search_path = '' as $$
+  with gone as (
+    delete from auth.users u
+    where coalesce(u.last_sign_in_at, u.created_at) < now() - interval '90 days'
+      and not exists (
+        select from auth.sessions s
+        where s.user_id = u.id
+          and greatest(s.created_at, s.updated_at, s.refreshed_at at time zone 'utc') > now() - interval '90 days'
+      )
+    returning 1
+  )
+  select count(*)::integer from gone
+$$;
+revoke all on function gate.forget_unused_accounts() from public;
+
+-- The schedule lives in the database, because nothing outside of it holds a
+-- key to the accounts. A plain Postgres without pg_cron skips this.
+do $$
+begin
+  if exists (select from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron;
+    perform cron.schedule('forget-unused-accounts', '17 3 * * *', 'select gate.forget_unused_accounts()');
+  end if;
+end $$;
