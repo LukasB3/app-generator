@@ -55,6 +55,8 @@ describe('POST /api/jobs', () => {
     const third = (await submit('a clock', '203.0.113.3')).json()
     expect(first.id).toMatch(/^[a-z2-7]{20}$/)
     expect(Math.abs(Date.now() - first.now)).toBeLessThan(5000)
+    expect(Math.abs(first.expiresAt - first.now - cfg.APP_TTL_H * 3_600_000)).toBeLessThan(5000)
+    expect(store.getJob(first.id)!.appId).toBe(first.id)
 
     const state = async (id: string) => (await app.inject({ url: `/api/jobs/${id}` })).json()
     expect(await state(first.id)).toMatchObject({ status: 'coding', position: 0 })
@@ -166,6 +168,22 @@ describe('job results', () => {
     expect((await app.inject({ url: `/api/jobs/${id}` })).json().error).toBe('Something went wrong while building your app.')
   })
 
+  it('keeps the app of a finished build and drops the app of a failed one', async () => {
+    await setup(gated)
+    const built = (await submit()).json()
+    release.shift()!()
+    await expect.poll(() => store.getJob(built.id)!.status).toBe('done')
+    expect(store.liveAppIds()).toEqual([built.id])
+
+    await app.close()
+    await setup(async () => {
+      throw new Error('push failed')
+    })
+    const failed = (await submit()).json()
+    await expect.poll(() => store.getJob(failed.id)!.status).toBe('failed')
+    expect(store.liveAppIds()).toEqual([])
+  })
+
   it('answers 404 for unknown or malformed ids', async () => {
     await setup(gated)
     expect((await app.inject({ url: `/api/jobs/${newJobId()}` })).statusCode).toBe(404)
@@ -176,18 +194,22 @@ describe('job results', () => {
   it('marks in-flight jobs as failed after a restart', async () => {
     await setup(gated)
     const { id } = (await submit()).json()
-    expect(store.failInterrupted('restarted')).toBe(1)
+    expect(store.failInterrupted('restarted')).toEqual([id])
     expect(store.getJob(id)).toMatchObject({ status: 'failed', error: 'restarted' })
+    expect(store.liveAppIds()).toEqual([])
   })
 
-  it('purges old jobs and their events', async () => {
+  it('purges old jobs with their events, and apps long after they expired', async () => {
     await setup(gated)
-    store.createJob('old', 'an old request', 'h', Date.now() - 40 * 24 * 3_600_000)
-    store.createJob('new', 'a new request', 'h')
-    expect(store.purgeOlderThan(Date.now() - 30 * 24 * 3_600_000)).toBe(1)
+    const day = 24 * 3_600_000
+    store.createJob('old', 'an old request', 'h', Date.now() - 39 * day, Date.now() - 40 * day)
+    store.createJob('new', 'a new request', 'h', Date.now() + day)
+    expect(store.purgeOlderThan(Date.now() - 30 * day)).toBe(1)
     expect(store.getJob('old')).toBeUndefined()
+    expect(store.getApp('old')).toBeUndefined()
     expect(store.events('old')).toHaveLength(0)
     expect(store.getJob('new')).toBeDefined()
+    expect(store.getApp('new')).toBeDefined()
   })
 
   it('only allows the website origin through CORS', async () => {

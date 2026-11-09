@@ -67,7 +67,7 @@ export const createPipeline = (cfg: Config): Pipeline => {
       })
 
       report.status('publishing')
-      return await publish(job.id, files)
+      return await publish(job.appId, job.id, files)
     } finally {
       await killContainer(cfg, job.id)
       await rm(workspace, { recursive: true, force: true })
