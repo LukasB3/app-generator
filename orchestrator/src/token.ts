@@ -11,6 +11,10 @@ const mac = (secret: string, jobId: string, exp: number) =>
 export const signJobToken = (secret: string, jobId: string, expiresAtS: number) =>
   `${TOKEN_PREFIX}.${jobId}.${expiresAtS}.${mac(secret, jobId, expiresAtS)}`
 
+// The orchestrator's pass for the database gateway's admin routes. It has a
+// prefix and a secret of its own, so a job token can never stand in for it.
+export const signAdminToken = (secret: string, expiresAtS: number) => `aga1.${expiresAtS}.${createHmac('sha256', secret).update(`aga1.${expiresAtS}`).digest('hex')}`
+
 export const verifyJobToken = (secret: string, token: string, nowS = Date.now() / 1000) => {
   const [prefix, jobId, expRaw, sig, ...rest] = token.split('.')
   if (prefix !== TOKEN_PREFIX || !jobId || !expRaw || !sig || rest.length) return null

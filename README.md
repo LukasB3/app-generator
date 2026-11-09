@@ -42,6 +42,7 @@ flowchart LR
 | Injection through the prompt | The prompt reaches the agent on stdin only. Job ids are generated server-side and are the only request-derived value in any path or command. Every subprocess is started with an argument array, never through a shell. |
 | Nonsense or abusive requests | One short classification call (Claude Haiku 5.5, through the key proxy with a job token) before a job is queued. It is a courtesy filter, not a boundary: its answer is one of three fixed values, and a prompt that fools it only reaches the sandbox and the checker like any other. If the call fails, the request goes through. |
 | Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online, and that its owner can change it. For everyone else the change route answers as if the app did not exist. |
+| Database (groundwork) | Generated apps are going to get tables of their own. What exists so far is the gateway that will create them, and no agent can reach it yet. It builds every statement itself from a short list of allowed changes and logs in as a role with rights on one schema and no way to the accounts, which it checks about itself before it does any work. The role's password is made on the server and reaches the database only as a SCRAM verifier. Row level security, explicit grants and a trigger decide what a visitor can do to a table and how much it can hold. |
 | Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
 The full reasoning, including the trade-offs that remain, is in [docs/threat-model.md](docs/threat-model.md).
@@ -52,8 +53,9 @@ The full reasoning, including the trade-offs that remain, is in [docs/threat-mod
 | --- | --- |
 | `web/` | The website: Vite, TypeScript, no framework. Deployed to Vercel. |
 | `orchestrator/` | API, queue, sandbox runner, checker, publisher and the key proxy (Node 22, TypeScript, Fastify, built-in SQLite). |
+| `dbgate/` | The database gateway: creates and removes the tables of generated apps (Node 22, TypeScript, `pg`). |
 | `sandbox/` | Image for the agent container, its system prompt and the bundled libraries. |
-| `infra/` | Provisioning and deploy scripts, sandbox launcher, Caddy config, systemd unit, compose file. |
+| `infra/` | Provisioning and deploy scripts, sandbox launcher, Caddy config, systemd unit, compose file, database setup. |
 
 ## Development
 
@@ -64,6 +66,10 @@ cd orchestrator
 npm ci
 npm test          # checker, proxy, launcher, token, API and queue tests
 npm run typecheck
+
+cd ../dbgate
+npm ci
+npm test          # the tests against Postgres run when TEST_DATABASE_URL names a superuser on a test server
 
 cd ../web
 npm ci
@@ -85,6 +91,8 @@ sudo ./infra/deploy.sh
 ```
 
 The website is a Vercel project with `web/` as its root directory and `VITE_API_BASE` and `VITE_TURNSTILE_SITEKEY` set.
+
+The database gateway is optional as well, and nothing depends on it yet. It needs `infra/supabase-setup.sql` run once in the Supabase project, and the project's pooler address and role name in `infra/compose.yml`. The first deploy makes the role's password; `infra/gate-role.mjs` on the server then prints the statement that gives it to the database.
 
 Accounts are optional. They need a Supabase project with e-mail login, its own SMTP provider and Turnstile as captcha. Set `SUPABASE_URL` and `SUPABASE_KEY` (the publishable key) in `orchestrator.env`, and `VITE_SUPABASE_URL`, `VITE_SUPABASE_KEY` and `VITE_TURNSTILE_LOGIN_SITEKEY` for the website, and add the project's `/auth/v1/` address to `connect-src` in `web/vercel.json`. Without these settings nobody can log in and everything else works the same.
 

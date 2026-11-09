@@ -17,7 +17,8 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 | The host | | |
 | Visitors of published apps | their browsers | |
 | The budget | Anthropic workspace | |
-| Accounts: e-mail addresses and logins | Supabase project (Auth) | Supabase; nothing on this server holds a key to it |
+| Accounts: e-mail addresses and logins | Supabase project (Auth) | Supabase; the one database login on this server is for a role that cannot read them |
+| Password of the database gateway's role | `/etc/app-generator/dbgate.env`, environment of the gateway container | root |
 
 ## Trust boundaries
 
@@ -27,6 +28,7 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 4. **Sandbox → orchestrator (the workspace).** Whatever the agent wrote is hostile data. It is read by the checker and never executed on the server.
 5. **Orchestrator → GitHub.** Git runs with a deploy key scoped to one repository and a pinned host key.
 6. **Published app → visitor.** The app runs in the visitor's browser under a policy the agent cannot change.
+7. **Orchestrator → database gateway → database.** The gateway holds the one database login. It takes a short list of table changes from the orchestrator, never SQL, and no sandbox can reach it yet.
 
 ## Threats and controls
 
@@ -84,7 +86,7 @@ The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'n
 ### The attacker targets the accounts
 
 - Logging in is optional and has no password to steal: Supabase Auth mails a link and a code. The orchestrator verifies each login token against the project's public keys, with the algorithm, issuer and audience pinned, and uses nothing from it but the account id. Other claims in a token are partly written by the user.
-- The server holds no Supabase secret, and the website only the publishable key. A break-in here yields no access to the addresses.
+- The website holds only the publishable key. The server holds one Supabase credential: the password of the database gateway's role, which has no way to the accounts (next section). A break-in here yields no access to the addresses.
 - A token that does not verify ends the request. It is never read as "not logged in", which would hand the visitor an anonymous app they believe is theirs.
 - An account costs nothing to create, so it buys nothing an address does not already get: the hourly limit and the daily budget are counted per address and per account. What an account changes is the lifetime of its apps.
 - The list of someone's apps is answered only for the account in a verified token. Watching a build still needs nothing but the job id, as before.
@@ -92,6 +94,19 @@ The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'n
 - A change starts from files an agent wrote earlier. Passing the checker once earns them no trust: the whole app goes through the checker again, and what is stored is the text the checker read, not what was in the workspace afterwards. Whatever those files say to the next agent, they were written at the request of the same account.
 - A change that is still waiting when its app ends is not published: the publisher asks again once it holds the repository, the same moment the cleanup decides.
 - Anyone can ask for a login mail to any address. The form is behind a captcha that Supabase checks, and Supabase limits how often mail goes out, in total and per address.
+
+### The attacker targets the database
+
+Generated apps are going to get tables of their own, in the Supabase project that also holds the accounts. So far only the groundwork exists: a gateway that creates and removes such tables. No agent can reach it yet. It is not on the sandbox network, its port is open on the host's loopback address only, and its routes answer only to a pass from the orchestrator, signed with a secret of its own and good for 30 seconds.
+
+- **No SQL comes from outside.** The gateway accepts a list of changes: create a table, add a column. It builds every statement itself. A name must match a strict pattern before it is quoted, types and access modes come from fixed lists, and a refusal never repeats the input that failed.
+- **The gateway's role cannot get at the accounts.** It is a member of no other role and has rights on one schema, `apps`, which holds nothing but the apps' tables. Tried on the project with a role of the same making: `auth`, `storage`, the vault, other roles' passwords, files and programs on the database server are all refused.
+- **The gateway checks its own role.** Before it does any work it asks the database what its role is and what it may use. If the role has gained a special power, a membership or a schema it has no business in, the gateway refuses to work until it is restarted. Its statements are only as harmless as the role that runs them.
+- **The password never left the server in the clear.** The server makes it. The database is given a SCRAM verifier of it, which is what Postgres stores anyway; the statement that sets it can sit in an editor's history or a log without giving the password away. The connection is encrypted and checked against Supabase's certificate authority.
+- **What visitors can do to a table is decided when it is made.** Every table gets row level security, explicit grants to the visitors' role and nothing for logged-in accounts. Visitors can read and add rows, in tables made for it also change and delete them, and never set a row's id or time. A trigger caps a row at 2 kB and a table at 500 rows; an app gets three tables, all apps together 150.
+- **Tables go when their app goes.** Once an hour the orchestrator sends the list of live apps and the gateway drops every table of its own that belongs to none of them. Tables it did not make are never touched.
+
+What remains: the role can create any kind of object in `apps`, not only tables. It can also install the extensions Supabase offers, because Supabase lets every database role do that, and some of those make requests from the database server. It can fill the database, which would stop logins as well, since both live in one project. None of this is within reach of a visitor or an agent. It would take control of the gateway itself, whose only input is the orchestrator's.
 
 ## Known trade-offs
 

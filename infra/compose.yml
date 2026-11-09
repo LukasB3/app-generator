@@ -24,6 +24,30 @@ services:
     # with a job token, like a sandbox would.
     ports: ['127.0.0.1:8788:8080']
 
+  # Creates and removes the tables of generated apps. It holds the only
+  # database credential on this server, for a role that can do nothing else.
+  # Only the orchestrator talks to it so far, over host loopback: it is not on
+  # the sandbox network.
+  dbgate:
+    build: ../dbgate
+    image: ag-dbgate:latest
+    container_name: ag-dbgate
+    restart: unless-stopped
+    env_file:
+      - /etc/app-generator/dbgate.env
+    environment:
+      # Supabase's pooler for the project's region, and the gateway's own role
+      # in the project. Neither is secret; the password is in dbgate.env.
+      PGHOST: aws-1-eu-central-1.pooler.supabase.com
+      PGUSER: ag_gate.sjzzdkyxadmifktilrre
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 128
+    mem_limit: 256m
+    networks: [egress]
+    ports: ['127.0.0.1:8789:8080']
+
   sandbox:
     build: ../sandbox
     image: ag-sandbox:latest
