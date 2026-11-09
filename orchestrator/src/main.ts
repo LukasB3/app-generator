@@ -6,6 +6,7 @@ import { createPipeline } from './pipeline.js'
 import { createAppCleanup } from './publish.js'
 import { killContainer } from './sandbox.js'
 import { promptScreen } from './screen.js'
+import { removeSourcesExcept } from './sources.js'
 import { buildServer } from './server.js'
 import { Store } from './store.js'
 import { turnstile } from './turnstile.js'
@@ -23,8 +24,9 @@ const interrupted = store.failInterrupted('The server restarted while this app w
 await Promise.all(interrupted.map((id) => killContainer(cfg, id)))
 for (const name of readdirSync(jobsDir)) rmSync(join(jobsDir, name), { recursive: true, force: true })
 
-// A published app is removed when it expires. Job records, with the prompt and
-// the visitor hash, are kept for 30 days for the limits and for debugging.
+// A published app is removed when it expires, and with it the files kept for
+// changing it. Job records, with the prompt and the visitor hash, are kept for
+// 30 days for the limits and for debugging.
 const RETENTION_MS = 30 * 24 * 3_600_000
 const removeExpiredApps = createAppCleanup(cfg)
 // A free Supabase project is paused after a week without database activity,
@@ -37,13 +39,14 @@ const touchSupabase = async () => {
 
 const purge = async () => {
   await removeExpiredApps(() => store.liveAppIds()).catch((error: unknown) => console.error('app cleanup failed', error))
+  await removeSourcesExcept(cfg, store.liveAppIds()).catch((error: unknown) => console.error('removing stored sources failed', error))
   store.purgeOlderThan(Date.now() - RETENTION_MS)
   await touchSupabase().catch((error: unknown) => console.error('Supabase keep-alive failed', error))
 }
 void purge()
 setInterval(() => void purge(), 3_600_000).unref()
 
-const worker = new Worker(store, createPipeline(cfg))
+const worker = new Worker(store, createPipeline(cfg, store))
 const auth = cfg.SUPABASE_URL ? supabaseAuth(cfg.SUPABASE_URL) : noAuth
 const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg), auth })
 

@@ -126,7 +126,9 @@ const render = (job: JobState) => {
   else startClock()
 
   if (job.status === 'done' && job.url) {
-    resultLink.href = job.url
+    // A changed app keeps its address. Naming the build makes the browser fetch it instead of a copy it has kept.
+    resultLink.href = `${job.url}?v=${job.id}`
+    resultLink.dataset.address = job.url
     const wasHidden = result.hidden
     result.hidden = false
     $('copy').hidden = false
@@ -259,7 +261,7 @@ document.querySelectorAll<HTMLButtonElement>('.examples button').forEach((button
 )
 
 $('copy').addEventListener('click', async () => {
-  await navigator.clipboard.writeText(resultLink.href).catch(() => {})
+  await navigator.clipboard.writeText(resultLink.dataset.address ?? resultLink.href).catch(() => {})
   $('copy').textContent = 'Link copied'
   window.setTimeout(() => ($('copy').textContent = 'Copy link'), 2000)
 })

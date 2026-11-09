@@ -91,6 +91,34 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth }:
     if (store.queuedCount() >= cfg.QUEUE_MAX) return 'The queue is full right now. Please try again in a few minutes.'
   }
 
+  // Queues a job that has passed its route's own checks: the first build of a
+  // new app, or a change to the app in `appId`.
+  const submit = async (req: FastifyRequest, reply: FastifyReply, prompt: string, userId: string | null, app: { expiresAt: number } | { appId: string }) => {
+    const ipHash = hashIp(req.ip)
+    const visitor: Who[] = userId ? [{ ipHash }, { userId }] : [{ ipHash }]
+    const obstacle = (): [number, string] | undefined => {
+      if ('appId' in app && store.hasOpenJob(app.appId)) return [409, 'This app is being built or changed right now. Wait until that is finished.']
+      const overLimit = limitError(visitor)
+      if (overLimit) return [429, overLimit]
+    }
+    const blocked = obstacle()
+    if (blocked) return refuse(reply, ...blocked)
+
+    const id = newJobId()
+    const verdict = await screen(prompt, id)
+    if (verdict !== 'ok') {
+      req.log.info({ verdict }, 'prompt screened out')
+      return refuse(reply, 422, SCREENED_OUT[verdict])
+    }
+
+    // Other submissions may have been queued while the screen was running.
+    const blockedNow = obstacle()
+    if (blockedNow) return refuse(reply, ...blockedNow)
+    store.createJob({ id, prompt, ipHash, userId, ...app })
+    worker.kick()
+    return reply.code(202).send(view(store.getJob(id)!))
+  }
+
   app.get('/api/health', () => ({ ok: true }))
 
   app.post('/api/jobs', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
@@ -100,25 +128,24 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth }:
     const userId = await whoIs(req, reply)
     if (userId === undefined) return reply
     if (!(await captcha(parsed.data.captchaToken, req.ip))) return refuse(reply, 403, 'The captcha check failed. Please try again.')
+    return submit(req, reply, parsed.data.prompt, userId, { expiresAt: Date.now() + (userId ? cfg.USER_APP_TTL_H : cfg.APP_TTL_H) * HOUR })
+  })
 
-    const ipHash = hashIp(req.ip)
-    const visitor: Who[] = userId ? [{ ipHash }, { userId }] : [{ ipHash }]
-    const overLimit = limitError(visitor)
-    if (overLimit) return refuse(reply, 429, overLimit)
-
-    const id = newJobId()
-    const verdict = await screen(parsed.data.prompt, id)
-    if (verdict !== 'ok') {
-      req.log.info({ verdict }, 'prompt screened out')
-      return refuse(reply, 422, SCREENED_OUT[verdict])
-    }
-
-    // Other submissions may have been queued while the screen was running.
-    const nowOverLimit = limitError(visitor)
-    if (nowOverLimit) return refuse(reply, 429, nowOverLimit)
-    store.createJob({ id, prompt: parsed.data.prompt, ipHash, userId, expiresAt: Date.now() + (userId ? cfg.USER_APP_TTL_H : cfg.APP_TTL_H) * HOUR })
-    worker.kick()
-    return reply.code(202).send(view(store.getJob(id)!))
+  // A change to an app: a new job on the same app, for its owner only. To
+  // everyone else the app does not exist here, whether or not it does.
+  app.post<{ Params: { id: string } }>('/api/apps/:id/edits', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const parsed = submission.safeParse(req.body)
+    if (!parsed.success) return refuse(reply, 400, `Please describe the change in 5 to ${cfg.PROMPT_MAX_CHARS} characters.`)
+    const userId = await whoIs(req, reply)
+    if (userId === undefined) return reply
+    if (userId === null) return refuse(reply, 401, 'Please log in to change an app.')
+    const owned = JOB_ID.test(req.params.id) ? store.getApp(req.params.id) : undefined
+    if (!owned || owned.ownerId !== userId || owned.expiresAt <= Date.now()) return refuse(reply, 404, 'Unknown app.')
+    if (!owned.currentJobId) return refuse(reply, 409, 'This app cannot be changed: it has not been published yet, or it was built before changes were possible.')
+    // A change needs time to be built, and it never moves the end of the app.
+    if (owned.expiresAt - Date.now() < HOUR) return refuse(reply, 409, 'This app is removed within the hour, so it can no longer be changed.')
+    if (!(await captcha(parsed.data.captchaToken, req.ip))) return refuse(reply, 403, 'The captcha check failed. Please try again.')
+    return submit(req, reply, parsed.data.prompt, userId, { appId: owned.id })
   })
 
   app.get('/api/apps', async (req, reply) => {

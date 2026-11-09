@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadConfig } from '../src/config.js'
-import { createAppCleanup, createPublisher, PublishError } from '../src/publish.js'
+import { AppGone, createAppCleanup, createPublisher, PublishError } from '../src/publish.js'
 
 let dir: string
 const git = (cwd: string, ...args: string[]) =>
@@ -70,10 +70,23 @@ describe('publishing', () => {
       ['index.html', Buffer.from('<p>second version</p>')],
       ['lib/qrcode.js', Buffer.from('// lib')],
     ])
-    await expect(publish('keep1', 'job2', files)).rejects.toThrow(PublishError)
+    // The hook runs once the files are in the repository, even though the page then fails to show up.
+    let remoteWhenPushed = ''
+    const hooks = { isLive: () => true, pushed: async () => void (remoteWhenPushed = lastCommit()!) }
+    await expect(publish('keep1', 'job2', files, hooks)).rejects.toThrow(PublishError)
+    expect(remoteWhenPushed).toBe('publish app keep1')
 
     expect(published()).toContain('apps/keep1/lib/qrcode.js')
     expect(git(dir, '-C', 'remote.git', 'show', 'main:apps/keep1/index.html')).toBe('<p>second version</p>')
-    expect(lastCommit()).toBe('publish app keep1')
+  })
+
+  it('publishes nothing for an app that has ended while its change waited', async () => {
+    const publish = createPublisher(config({ PUBLISH_WAIT_S: '0' }))
+    let pushed = false
+    const hooks = { isLive: () => false, pushed: async () => void (pushed = true) }
+    await expect(publish('keep1', 'job2', new Map([['index.html', Buffer.from('<p>too late</p>')]]), hooks)).rejects.toThrow(AppGone)
+    expect(pushed).toBe(false)
+    expect(lastCommit()).toBe('seed')
+    expect(git(dir, '-C', 'remote.git', 'show', 'main:apps/keep1/index.html')).toBe('<p>keep1</p>')
   })
 })

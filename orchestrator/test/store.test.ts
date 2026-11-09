@@ -50,7 +50,7 @@ describe('schema migrations', () => {
 
     expect(store.getJob('done1')).toMatchObject({ appId: 'done1', prompt: 'request done1', status: 'done', createdAt: created })
     expect(store.events('done1')).toHaveLength(1)
-    expect(store.getApp('done1')).toEqual({ id: 'done1', ownerId: null, createdAt: created, expiresAt: created + 30 * DAY })
+    expect(store.getApp('done1')).toEqual({ id: 'done1', ownerId: null, currentJobId: null, createdAt: created, expiresAt: created + 30 * DAY })
     expect(store.getApp('failed1')).toBeUndefined()
     expect(store.liveAppIds().sort()).toEqual(['done1', 'queued1'])
     expect(store.nextQueued()).toMatchObject({ id: 'queued1', appId: 'queued1' })
@@ -59,7 +59,7 @@ describe('schema migrations', () => {
     expect(store.getJob('fresh1')!.appId).toBe('fresh1')
     expect(store.costSince(0)).toBe(0)
     store.close()
-    expect(version()).toBe(4)
+    expect(version()).toBe(5)
   })
 
   it('keeps a copy of the old file and removes it with the records it mirrors', () => {
@@ -116,7 +116,7 @@ describe('schema migrations', () => {
 
   it('leaves an up-to-date file alone and makes no copy of an empty one', () => {
     new Store(path).close()
-    expect(version()).toBe(4)
+    expect(version()).toBe(5)
     expect(existsSync(`${path}.bak`)).toBe(false)
 
     const store = new Store(path)
