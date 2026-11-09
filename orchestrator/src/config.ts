@@ -24,6 +24,7 @@ const schema = z.object({
   JOBS_PER_IP_PER_HOUR: z.coerce.number().int().default(3),
   JOBS_PER_HOUR: z.coerce.number().int().default(10),
   JOBS_PER_DAY: z.coerce.number().int().default(30),
+  APP_TTL_H: z.coerce.number().int().positive().default(720),
 
   APPS_REPO: z.string().default('git@github.com:LukasB3/app-generator-apps.git'),
   APPS_BASE_URL: z.url().default('https://lukasb3.github.io/app-generator-apps'),

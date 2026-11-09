@@ -14,6 +14,7 @@ interface JobState {
   position: number
   url: string | null
   error: string | null
+  expiresAt?: number | null
   now?: number
 }
 interface Progress {
@@ -100,6 +101,14 @@ const stopClock = () => {
   startedAt = 0
 }
 
+// How long the app stays online from now, measured on the server's clock.
+const lifetime = (job: JobState) => {
+  if (!job.expiresAt) return ''
+  const hours = Math.max(1, Math.round((job.expiresAt - (job.now ?? Date.now())) / 3_600_000))
+  const [count, unit] = hours < 48 ? [hours, 'hour'] : [Math.round(hours / 24), 'day']
+  return ` It stays online for ${count} ${unit}${count === 1 ? '' : 's'}.`
+}
+
 // "failed" is not a station: the job stops wherever it was.
 let lastStation: Status = 'queued'
 const render = (job: JobState) => {
@@ -117,7 +126,7 @@ const render = (job: JobState) => {
   })
 
   if (job.status === 'queued') setTicket('waiting', 'Your place in line', String(job.position), job.position <= 1 ? 'You are next.' : 'The line moves when the app ahead of you is finished.')
-  else if (job.status === 'done') setTicket('done', 'Your app is', 'Live', 'Open it with the link below. It stays online for 30 days.')
+  else if (job.status === 'done') setTicket('done', 'Your app is', 'Live', `Open it with the link below.${lifetime(job)}`)
   else if (job.status === 'failed') setTicket('failed', 'The build', 'Failed', job.error ?? 'This app could not be built.')
   else startClock()
 

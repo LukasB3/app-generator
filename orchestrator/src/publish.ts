@@ -61,18 +61,20 @@ export const createPublisher = (cfg: Config) => {
     throw new PublishError('published, but the page did not come online in time')
   }
 
-  return async (jobId: string, files: Map<string, Buffer>) => {
-    const url = `${cfg.APPS_BASE_URL}/apps/${jobId}/`
+  // The app id decides where the files go. The job id is the marker in the
+  // page that shows this build is the one being served.
+  return async (appId: string, jobId: string, files: Map<string, Buffer>) => {
+    const url = `${cfg.APPS_BASE_URL}/apps/${appId}/`
     await withRepo(async () => {
       await sync()
-      const appDir = join(repoDir, 'apps', jobId)
+      const appDir = join(repoDir, 'apps', appId)
       await rm(appDir, { recursive: true, force: true })
       for (const [path, bytes] of files) {
         await mkdir(dirname(join(appDir, path)), { recursive: true })
         await writeFile(join(appDir, path), bytes)
       }
-      await git('add', '--', `apps/${jobId}`)
-      await git('commit', '--quiet', '-m', `publish app ${jobId}`)
+      await git('add', '--', `apps/${appId}`)
+      await git('commit', '--quiet', '-m', `publish app ${appId}`)
       await git('push', '--quiet', 'origin', 'HEAD:main')
     })
     await waitUntilLive(jobId, url)
@@ -80,15 +82,17 @@ export const createPublisher = (cfg: Config) => {
   }
 }
 
-// Removes every published app whose job is not in the keep list: apps past
-// retention, and orphans whose records are already gone. Returns the removed ids.
+// Removes every published app that is not in the keep list: expired apps, and
+// orphans whose records are already gone. Returns the removed ids. The list is
+// read once this run holds the working copy, so an app that was published
+// while it waited for its turn is on it.
 export const createAppCleanup = (cfg: Config) => {
   const { repoDir, git, sync } = appsRepo(cfg)
 
-  return (keepIds: Iterable<string>) =>
+  return (keepIds: () => Iterable<string>) =>
     withRepo(async () => {
       await sync()
-      const keep = new Set(keepIds)
+      const keep = new Set(keepIds())
       const entries = await readdir(join(repoDir, 'apps'), { withFileTypes: true }).catch(() => [])
       const stale = entries.filter((entry) => entry.isDirectory() && !keep.has(entry.name)).map((entry) => entry.name)
       if (stale.length === 0) return stale

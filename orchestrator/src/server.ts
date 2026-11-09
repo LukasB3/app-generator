@@ -55,7 +55,15 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
   })
 
   // `now` lets the page line its own clock up with the event timestamps.
-  const view = (job: Job) => ({ id: job.id, status: job.status, position: store.position(job.id), url: job.url, error: job.error, now: Date.now() })
+  const view = (job: Job) => ({
+    id: job.id,
+    status: job.status,
+    position: store.position(job.id),
+    url: job.url,
+    error: job.error,
+    expiresAt: store.getApp(job.appId)?.expiresAt ?? null,
+    now: Date.now(),
+  })
   const hashIp = (ip: string) => createHmac('sha256', cfg.IP_HASH_SECRET).update(clientKey(ip)).digest('hex').slice(0, 32)
   const refuse = (reply: FastifyReply, status: number, error: string) => reply.code(status).send({ error })
   const limitError = (ipHash: string, now = Date.now()) => {
@@ -85,7 +93,7 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
     // Other submissions may have been queued while the screen was running.
     const nowOverLimit = limitError(ipHash)
     if (nowOverLimit) return refuse(reply, 429, nowOverLimit)
-    store.createJob(id, parsed.data.prompt, ipHash)
+    store.createJob(id, parsed.data.prompt, ipHash, Date.now() + cfg.APP_TTL_H * HOUR)
     worker.kick()
     return reply.code(202).send(view(store.getJob(id)!))
   })
