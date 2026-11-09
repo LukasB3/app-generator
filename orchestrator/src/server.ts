@@ -66,9 +66,15 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
   })
   const hashIp = (ip: string) => createHmac('sha256', cfg.IP_HASH_SECRET).update(clientKey(ip)).digest('hex').slice(0, 32)
   const refuse = (reply: FastifyReply, status: number, error: string) => reply.code(status).send({ error })
+  // A job's cost is known when it ends, so jobs still waiting or running can
+  // take the total past a budget, each by at most the cap for a single job.
   const limitError = (ipHash: string, now = Date.now()) => {
-    if (store.countSince(now - HOUR, ipHash) >= cfg.JOBS_PER_IP_PER_HOUR) return 'You have reached the hourly limit. Please come back later.'
-    if (store.countSince(now - HOUR) >= cfg.JOBS_PER_HOUR || store.countSince(now - 24 * HOUR) >= cfg.JOBS_PER_DAY) return 'The app generator has reached its capacity for now. Please come back later.'
+    const jobs = (hours: number, visitor?: string) => store.countSince(now - hours * HOUR, visitor)
+    const usd = (hours: number, visitor?: string) => store.costSince(now - hours * HOUR, visitor) / 1e6
+    if (jobs(1, ipHash) >= cfg.JOBS_PER_IP_PER_HOUR) return 'You have reached the hourly limit. Please come back later.'
+    if (usd(24, ipHash) >= cfg.VISITOR_DAILY_BUDGET_USD) return 'You have reached the limit for today. Please come back tomorrow.'
+    if (jobs(1) >= cfg.JOBS_PER_HOUR || jobs(24) >= cfg.JOBS_PER_DAY || usd(24) >= cfg.DAILY_BUDGET_USD || usd(30 * 24) >= cfg.MONTHLY_BUDGET_USD)
+      return 'The app generator has reached its capacity for now. Please come back later.'
     if (store.queuedCount() >= cfg.QUEUE_MAX) return 'The queue is full right now. Please try again in a few minutes.'
   }
 

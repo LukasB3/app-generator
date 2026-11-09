@@ -5,12 +5,19 @@ import { verifyJobToken } from './token.js'
 // accepts per-job tokens, and forwards nothing but vetted Messages API calls.
 // Node built-ins only, so the process that holds the key has no dependencies.
 
+const KINDS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
+// Token counts of each kind, or what one token of each kind costs. Prices are
+// in USD per million tokens, which is the same number as micro-USD per token.
+export type Usage = Record<(typeof KINDS)[number], number>
+
 export interface ProxyPolicy {
-  models: string[]
+  // The models a job may use are the ones that have a price.
+  prices: Map<string, Usage>
   maxTokens: number
   maxBodyBytes: number
   maxRequestsPerJob: number
   maxOutputTokensPerJob: number
+  maxCostUsdPerJob: number
 }
 
 export interface ProxyOptions {
@@ -21,7 +28,7 @@ export interface ProxyOptions {
   log?: (line: string) => void
 }
 
-type Verdict = { ok: true; body: string } | { ok: false; message: string }
+type Verdict = { ok: true; body: string; model: string; maxTokens: number } | { ok: false; message: string }
 
 // Only client-side tools may pass. Server tools (web search, web fetch, code
 // execution) and MCP connectors would hand the sandbox internet access through
@@ -34,32 +41,62 @@ export const vetRequest = (raw: Buffer, policy: ProxyPolicy): Verdict => {
     return { ok: false, message: 'body is not JSON' }
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return { ok: false, message: 'body is not an object' }
-  if (typeof body.model !== 'string' || !policy.models.includes(body.model)) return { ok: false, message: `model not allowed: ${String(body.model).replace(/[^a-z0-9.-]/gi, '').slice(0, 60)}` }
+  if (typeof body.model !== 'string' || !policy.prices.has(body.model)) return { ok: false, message: `model not allowed: ${String(body.model).replace(/[^a-z0-9.-]/gi, '').slice(0, 60)}` }
   if ('mcp_servers' in body) return { ok: false, message: 'mcp_servers not allowed' }
   if (body.tools !== undefined) {
     if (!Array.isArray(body.tools)) return { ok: false, message: 'tools must be a list' }
     for (const tool of body.tools) if (typeof tool?.type === 'string' && tool.type !== 'custom') return { ok: false, message: 'server tools not allowed' }
   }
   if (typeof body.max_tokens !== 'number' || body.max_tokens > policy.maxTokens) body.max_tokens = policy.maxTokens
-  return { ok: true, body: JSON.stringify(body) }
+  return { ok: true, body: JSON.stringify(body), model: body.model, maxTokens: body.max_tokens as number }
 }
 
-// Pulls output token counts out of a Messages response. A plain response is
-// parsed, never pattern-matched: its tool inputs are raw JSON the model chose,
-// so they could imitate a stream event. In a stream they only occur as strings.
-export const outputTokensIn = (text: string, streamed: boolean) => {
-  if (streamed) {
-    let total = 0
-    for (const match of text.matchAll(/"type"\s*:\s*"message_delta"[^\n]*?"output_tokens"\s*:\s*(\d+)/g)) total += Number(match[1])
-    return total
+const count = (value: unknown) => (typeof value === 'number' && value > 0 ? value : 0)
+const usageFrom = (usage: any): Usage => ({
+  input: count(usage?.input_tokens),
+  output: count(usage?.output_tokens),
+  cacheRead: count(usage?.cache_read_input_tokens),
+  cacheWrite: count(usage?.cache_creation_input_tokens),
+})
+
+// Pulls the token counts out of a Messages response. `complete` says whether
+// the final count arrived. Responses are parsed, never pattern-matched: tool
+// inputs are JSON the model chose, so they could imitate a usage block. In a
+// stream only an event's own type decides whether its usage is read, and the
+// counts are running totals, so the largest one seen is the final one.
+export const usageIn = (text: string, streamed: boolean, seen: Usage = noUsage()) => {
+  const read = (usage: unknown) => {
+    const found = usageFrom(usage)
+    for (const kind of KINDS) seen[kind] = Math.max(seen[kind], found[kind])
   }
-  try {
-    const tokens: unknown = JSON.parse(text)?.usage?.output_tokens
-    return typeof tokens === 'number' ? tokens : 0
-  } catch {
-    return 0
+  const parse = (json: string) => {
+    try {
+      return JSON.parse(json)
+    } catch {
+      return undefined
+    }
   }
+
+  if (!streamed) {
+    const usage = parse(text)?.usage
+    if (usage) read(usage)
+    return { usage: seen, complete: Boolean(usage) }
+  }
+  let complete = false
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('data:') || !line.includes('"usage"')) continue
+    const event = parse(line.slice(5))
+    if (event?.type === 'message_start') read(event.message?.usage)
+    if (event?.type === 'message_delta' && event.usage) {
+      read(event.usage)
+      complete = true
+    }
+  }
+  return { usage: seen, complete }
 }
+
+const noUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+const costOf = (usage: Usage, price: Usage) => KINDS.reduce((sum, kind) => sum + usage[kind] * price[kind], 0)
 
 const FORWARDED_HEADERS = ['content-type', 'accept', 'anthropic-version', 'anthropic-beta']
 
@@ -79,24 +116,35 @@ const readBody = async (req: IncomingMessage, limit: number) => {
   return Buffer.concat(chunks)
 }
 
+// A job's counters outlive its last token by this long, so the orchestrator
+// can still read what a job cost after its deadline has passed.
+const KEEP_S = 300
+
 export const createProxy = ({ apiKey, signingSecret, policy, upstream = 'https://api.anthropic.com', log = console.log }: ProxyOptions) => {
-  const usage = new Map<string, { requests: number; outputTokens: number; exp: number }>()
+  const jobs = new Map<string, { requests: number; tokens: Usage; costMicroUsd: number; exp: number }>()
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://proxy')
     if (req.method === 'GET' && url.pathname === '/healthz') return void res.writeHead(200).end('ok')
-    if (req.method !== 'POST' || url.pathname !== '/v1/messages') return reply(res, 404, 'not found')
+    const wantsUsage = req.method === 'GET' && url.pathname === '/v1/usage'
+    if (!wantsUsage && (req.method !== 'POST' || url.pathname !== '/v1/messages')) return reply(res, 404, 'not found')
 
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]
     const job = verifyJobToken(signingSecret, String(req.headers['x-api-key'] ?? bearer ?? ''))
     if (!job) return reply(res, 401, 'invalid or expired job token')
 
     const now = Date.now() / 1000
-    for (const [id, entry] of usage) if (entry.exp < now) usage.delete(id)
-    const spent = usage.get(job.jobId) ?? { requests: 0, outputTokens: 0, exp: job.exp }
-    usage.set(job.jobId, spent)
-    if (spent.requests >= policy.maxRequestsPerJob || spent.outputTokens >= policy.maxOutputTokensPerJob) {
-      log(`job=${job.jobId} refused: budget exhausted (${spent.requests} requests, ${spent.outputTokens} output tokens)`)
+    for (const [id, entry] of jobs) if (entry.exp + KEEP_S < now) jobs.delete(id)
+    const spent = jobs.get(job.jobId) ?? { requests: 0, tokens: noUsage(), costMicroUsd: 0, exp: job.exp }
+    jobs.set(job.jobId, spent)
+    // A job is seen with more than one token: the prompt screen's lasts 30 seconds, the build's until its deadline.
+    spent.exp = Math.max(spent.exp, job.exp)
+
+    // What the job has used so far, for the holder of one of its tokens.
+    if (wantsUsage) return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ requests: spent.requests, ...spent.tokens, costMicroUsd: Math.ceil(spent.costMicroUsd) }))
+
+    if (spent.requests >= policy.maxRequestsPerJob || spent.tokens.output >= policy.maxOutputTokensPerJob || spent.costMicroUsd >= policy.maxCostUsdPerJob * 1e6) {
+      log(`job=${job.jobId} refused: budget exhausted (${spent.requests} requests, ${spent.tokens.output} output tokens, $${(spent.costMicroUsd / 1e6).toFixed(4)})`)
       return reply(res, 400, 'job budget exhausted')
     }
 
@@ -116,26 +164,42 @@ export const createProxy = ({ apiKey, signingSecret, policy, upstream = 'https:/
     }
     const abort = new AbortController()
     res.on('close', () => abort.abort())
-    const upstreamRes = await fetch(`${upstream}/v1/messages${url.search === '?beta=true' ? url.search : ''}`, { method: 'POST', headers, body: verdict.body, signal: abort.signal })
-
-    res.writeHead(upstreamRes.status, { 'content-type': upstreamRes.headers.get('content-type') ?? 'application/json' })
-    const streamed = upstreamRes.headers.get('content-type')?.includes('event-stream') ?? false
-    const decoder = new TextDecoder()
+    const used = noUsage()
+    let complete = false
+    let status = 0
     let seen = ''
-    for await (const chunk of upstreamRes.body ?? []) {
-      res.write(chunk)
-      seen += decoder.decode(chunk, { stream: true })
-      const lastBreak = seen.lastIndexOf('\n')
-      if (streamed && lastBreak >= 0) {
-        spent.outputTokens += outputTokensIn(seen.slice(0, lastBreak), true)
-        seen = seen.slice(lastBreak + 1)
+    try {
+      const upstreamRes = await fetch(`${upstream}/v1/messages${url.search === '?beta=true' ? url.search : ''}`, { method: 'POST', headers, body: verdict.body, signal: abort.signal })
+      status = upstreamRes.status
+
+      res.writeHead(status, { 'content-type': upstreamRes.headers.get('content-type') ?? 'application/json' })
+      const streamed = upstreamRes.headers.get('content-type')?.includes('event-stream') ?? false
+      const decoder = new TextDecoder()
+      for await (const chunk of upstreamRes.body ?? []) {
+        res.write(chunk)
+        seen += decoder.decode(chunk, { stream: true })
+        const lastBreak = seen.lastIndexOf('\n')
+        if (streamed && lastBreak >= 0) {
+          complete = usageIn(seen.slice(0, lastBreak), true, used).complete || complete
+          seen = seen.slice(lastBreak + 1)
+        }
       }
+      complete = usageIn(seen, streamed, used).complete || complete
+      res.end()
+    } finally {
+      // An answer that was cut short is charged as if it had run in full, so
+      // breaking off before the final count arrives is no way around the budget.
+      // That covers a caller that hangs up before the first byte (status 0).
+      if (!complete && (status === 200 || (status === 0 && abort.signal.aborted))) {
+        used.output = Math.max(used.output, verdict.maxTokens)
+        if (used.input + used.cacheRead + used.cacheWrite === 0) used.input = Math.ceil(raw.length / 3)
+      }
+      for (const kind of KINDS) spent.tokens[kind] += used[kind]
+      spent.costMicroUsd += costOf(used, policy.prices.get(verdict.model)!)
+      // Upstream error bodies describe what was wrong with the request; they are worth keeping.
+      const detail = status === 200 ? (complete ? '' : ' cut short') : ` error=${seen.replace(/\s+/g, ' ').slice(0, 400)}`
+      log(`job=${job.jobId} status=${status} requests=${spent.requests} outputTokens=${spent.tokens.output} cost=$${(spent.costMicroUsd / 1e6).toFixed(4)}${detail}`)
     }
-    spent.outputTokens += outputTokensIn(seen, streamed)
-    res.end()
-    // Upstream error bodies describe what was wrong with the request; they are worth keeping.
-    const detail = upstreamRes.ok ? '' : ` error=${seen.replace(/\s+/g, ' ').slice(0, 400)}`
-    log(`job=${job.jobId} status=${upstreamRes.status} requests=${spent.requests} outputTokens=${spent.outputTokens}${detail}`)
   }
 
   return createServer((req, res) => {

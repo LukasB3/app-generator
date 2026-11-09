@@ -43,7 +43,8 @@ describe('promptScreen', () => {
       seen.push({ key: req.headers['x-api-key'], body: JSON.parse(Buffer.concat(chunks).toString()) })
       respond(res)
     })
-    const policy = { models: [MODEL], maxTokens: 16_000, maxBodyBytes: 100_000, maxRequestsPerJob: 60, maxOutputTokensPerJob: 120_000 }
+    const prices = new Map([[MODEL, { input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 1 }]])
+    const policy = { prices, maxTokens: 16_000, maxBodyBytes: 100_000, maxRequestsPerJob: 60, maxOutputTokensPerJob: 120_000, maxCostUsdPerJob: 4 }
     proxy = createProxy({ apiKey: 'REAL-KEY', signingSecret: SECRET, policy, upstream: await listen(upstream), log: () => {} })
     proxyUrl = await listen(proxy)
   })

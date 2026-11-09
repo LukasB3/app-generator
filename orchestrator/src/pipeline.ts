@@ -11,6 +11,7 @@ export interface Reporter {
   status: (status: JobStatus) => void
   file: (path: string) => void
   note: (text: string) => void
+  cost: (microUsd: number) => void
 }
 
 export type Pipeline = (job: Job, report: Reporter) => Promise<string>
@@ -27,6 +28,15 @@ const loadLibs = async (dir: string) => {
   const libs = new Map<string, Buffer>()
   for (const name of await readdir(dir)) if (name.endsWith('.js')) libs.set(name, await readFile(join(dir, name)))
   return libs
+}
+
+// What a job has cost, as the key proxy counted it. The job's own token may
+// have run out with its deadline, so the question is asked with a fresh one.
+export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string) => {
+  const token = signJobToken(cfg.PROXY_SIGNING_SECRET, jobId, Math.ceil(Date.now() / 1000) + 30)
+  const res = await fetch(`${cfg.PROXY_URL}/v1/usage`, { headers: { 'x-api-key': token }, signal: AbortSignal.timeout(5000) })
+  if (!res.ok) throw new Error(`the key proxy answered ${res.status}`)
+  return Number(((await res.json()) as { costMicroUsd: unknown }).costMicroUsd) || 0
 }
 
 export const createPipeline = (cfg: Config): Pipeline => {
@@ -71,6 +81,7 @@ export const createPipeline = (cfg: Config): Pipeline => {
     } finally {
       await killContainer(cfg, job.id)
       await rm(workspace, { recursive: true, force: true })
+      await jobCost(cfg, job.id).then(report.cost, (error: unknown) => console.error(`cost of job ${job.id} is unknown`, error))
     }
   }
 }

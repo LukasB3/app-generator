@@ -63,6 +63,8 @@ const MIGRATIONS = [
    UPDATE jobs SET appId = id;
    CREATE TABLE apps (id TEXT PRIMARY KEY, createdAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL);
    INSERT INTO apps (id, createdAt, expiresAt) SELECT id, createdAt, createdAt + ${30 * DAY} FROM jobs WHERE status != 'failed';`,
+  // 3: what each job cost, as the key proxy counted it, for the budgets.
+  `ALTER TABLE jobs ADD COLUMN costMicroUsd INTEGER NOT NULL DEFAULT 0;`,
 ]
 
 export class Store {
@@ -131,6 +133,18 @@ export class Store {
     const row = ipHash
       ? this.db.prepare('SELECT count(*) AS c FROM jobs WHERE createdAt >= ? AND ipHash = ?').get(since, ipHash)
       : this.db.prepare('SELECT count(*) AS c FROM jobs WHERE createdAt >= ?').get(since)
+    return (row as { c: number }).c
+  }
+
+  setCost(id: string, microUsd: number) {
+    this.db.prepare('UPDATE jobs SET costMicroUsd = ? WHERE id = ?').run(Math.ceil(microUsd), id)
+  }
+
+  // Micro-USD spent by jobs created since then, by everyone or by one visitor.
+  costSince(since: number, ipHash?: string) {
+    const row = ipHash
+      ? this.db.prepare('SELECT coalesce(sum(costMicroUsd), 0) AS c FROM jobs WHERE createdAt >= ? AND ipHash = ?').get(since, ipHash)
+      : this.db.prepare('SELECT coalesce(sum(costMicroUsd), 0) AS c FROM jobs WHERE createdAt >= ?').get(since)
     return (row as { c: number }).c
   }
 
