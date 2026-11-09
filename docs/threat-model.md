@@ -99,6 +99,7 @@ Two kinds of page get a wider policy, each by one path. A page that loads the da
 - Only the owner can change an app, and only one change runs at a time. Anyone else gets the same answer as for an app that does not exist. A change counts against the same limits and budgets as a new app and never moves the day the app is removed.
 - A change starts from files an agent wrote earlier. Passing the checker once earns them no trust: the whole app goes through the checker again, and what is stored is the text the checker read, not what was in the workspace afterwards. Whatever those files say to the next agent, they were written at the request of the same account.
 - A change that is still waiting when its app ends is not published: the publisher asks again once it holds the repository, the same moment the cleanup decides.
+- An account that is not used is not kept. A job that runs inside the database once a day deletes every account whose last login is more than 90 days ago and whose sessions have not been renewed since. It runs there because nothing outside the database holds a key to the accounts.
 - Anyone can ask for a login mail to any address. The form is behind a captcha that Supabase checks, and Supabase limits how often mail goes out, in total and per address.
 
 ### The hijacked agent goes for the database

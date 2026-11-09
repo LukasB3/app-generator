@@ -124,6 +124,40 @@ describe.skipIf(!url)('gateway against Postgres', () => {
     })
   })
 
+  describe('unused accounts', () => {
+    it('are deleted 90 days after their last login, unless a session was renewed since', async () => {
+      const account = async (email: string, createdDaysAgo: number, loginDaysAgo: number | null, sessionDaysAgo?: [created: number, updated: number | null, refreshed: number | null]) => {
+        const ago = (days: number | null) => (days === null ? 'null' : `now() - interval '${days} days'`)
+        const { rows } = await admin.query(`insert into auth.users (email, created_at, last_sign_in_at) values ('${email}', ${ago(createdDaysAgo)}, ${ago(loginDaysAgo)}) returning id`)
+        if (sessionDaysAgo) {
+          const [created, updated, refreshed] = sessionDaysAgo
+          await admin.query(`insert into auth.sessions (user_id, created_at, updated_at, refreshed_at) values ('${rows[0].id}', ${ago(created)}, ${ago(updated)}, (${ago(refreshed)}) at time zone 'utc')`)
+        }
+      }
+      await account('active@example.com', 200, 10, [10, 1, 1])
+      await account('just-inside@example.com', 200, 89)
+      await account('old-login-open-page@example.com', 200, 120, [120, 5, 5])
+      await account('old-login-renewed-only@example.com', 200, 120, [120, null, 30])
+      await account('asked-for-a-mail-yesterday@example.com', 1, null)
+      await account('gone-no-session@example.com', 200, 91)
+      await account('gone-old-session@example.com', 200, 120, [120, 95, 95])
+      await account('gone-session-never-renewed@example.com', 200, 100, [100, null, null])
+      await account('gone-never-logged-in@example.com', 100, null)
+
+      expect((await admin.query('select gate.forget_unused_accounts() as n')).rows[0].n).toBe(4)
+      const left = await admin.query('select email from auth.users order by 1')
+      expect(left.rows.map((row) => row.email)).toEqual(['active@example.com', 'asked-for-a-mail-yesterday@example.com', 'just-inside@example.com', 'old-login-open-page@example.com', 'old-login-renewed-only@example.com', 'someone@example.com'])
+      // Their sessions went with them, and nobody else's.
+      expect((await admin.query('select count(*)::int as n from auth.sessions')).rows[0].n).toBe(3)
+      expect((await admin.query('select gate.forget_unused_accounts() as n')).rows[0].n).toBe(0)
+    })
+
+    it('are nothing the gateway or a visitor could delete', async () => {
+      await expect(pool.query('select gate.forget_unused_accounts()')).rejects.toMatchObject(denied)
+      await expect(asAnon('select gate.forget_unused_accounts()')).rejects.toMatchObject(denied)
+    })
+  })
+
   describe('commit', () => {
     it('creates a table visitors can read and add to, and nothing else', async () => {
       expect(await gate.commit(APP, [entries])).toEqual([{ name: 'entries', mode: 'append', columns: [{ name: 'author', type: 'text' }, { name: 'stars', type: 'integer' }] }])
