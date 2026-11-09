@@ -66,7 +66,7 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
           jobId: job.id,
           libs,
           badgeUrl: cfg.WEB_ORIGIN,
-          extraSecrets: [token, cfg.PROXY_SIGNING_SECRET, cfg.TURNSTILE_SECRET, cfg.IP_HASH_SECRET],
+          extraSecrets: [token, cfg.PROXY_SIGNING_SECRET, cfg.TURNSTILE_SECRET, cfg.IP_HASH_SECRET, cfg.GATE_SIGNING_SECRET ?? ''],
         })
 
       report.status('coding')

@@ -38,6 +38,11 @@ const schema = z.object({
   SUPABASE_URL: z.url().optional(),
   SUPABASE_KEY: z.string().min(1).optional(),
 
+  // The database gateway, which creates and removes the tables of generated
+  // apps. Without its secret the orchestrator leaves it alone.
+  GATE_URL: z.url().default('http://127.0.0.1:8789'),
+  GATE_SIGNING_SECRET: secret.optional(),
+
   APPS_REPO: z.string().default('git@github.com:LukasB3/app-generator-apps.git'),
   APPS_BASE_URL: z.url().default('https://lukasb3.github.io/app-generator-apps'),
   DEPLOY_KEY_PATH: z.string().default('/etc/app-generator/deploy_key'),
