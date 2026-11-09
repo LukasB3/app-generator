@@ -612,6 +612,19 @@ dd {
   font-size: 1.1875rem;
 }
 
+.entry textarea {
+  min-height: 6rem;
+  font-size: 1.0625rem;
+}
+
+.apps .entry {
+  margin-top: 1.25rem;
+}
+
+.entry .notice {
+  margin-top: 0;
+}
+
 .entry input.code {
   max-width: 12rem;
   font-family: var(--mono);

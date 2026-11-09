@@ -32,7 +32,7 @@ const problemsOf = async (files: Record<string, string>) => {
 
 describe('accepted apps', () => {
   it('publishes a plain app with our CSP, job marker and badge injected', async () => {
-    const out = await validateWorkspace(
+    const { files: out, sources } = await validateWorkspace(
       await workspace({
         'index.html': page('<h1>Hi</h1><a href="#top">top</a><img src="data:image/png;base64,AAAA"><script src="js/app.js"></script>', '<link rel="stylesheet" href="style.css">'),
         'style.css': 'body { background: url("data:image/png;base64,AAAA") }',
@@ -46,10 +46,31 @@ describe('accepted apps', () => {
     expect(html.indexOf('Content-Security-Policy')).toBeLessThan(html.indexOf('<title>'))
     expect(html).toContain('<meta name="app-generator-job" content="job123">')
     expect(html).toContain('AI-generated demo')
+
+    // What a later change starts from: the agent's text, untouched by anything the checker added.
+    expect([...sources.keys()].sort()).toEqual(['index.html', 'js/app.js', 'style.css'])
+    expect(sources.get('index.html')).toBe(page('<h1>Hi</h1><a href="#top">top</a><img src="data:image/png;base64,AAAA"><script src="js/app.js"></script>', '<link rel="stylesheet" href="style.css">'))
+  })
+
+  it('marks links to the app\'s own files with the job that built them', async () => {
+    const body = '<a href="#top">a</a><a href="about.html#team">b</a><a href="">c</a><img src="data:image/png;base64,AAAA"><script src="app.js?keep=1"></script><script src=" js/more.js "></script><script src="lib/qrcode.js"></script>'
+    const { files, sources } = await validateWorkspace(
+      await workspace({ 'index.html': page(body, '<link rel="stylesheet" href="style.css">'), 'about.html': page('x'), 'style.css': 'p{}', 'app.js': '1', 'js/more.js': '2' }),
+      opts,
+    )
+    const html = files.get('index.html')!.toString()
+    for (const kept of ['href="#top"', 'href=""', 'src="data:image/png;base64,AAAA"', 'src="app.js?keep=1"']) expect(html).toContain(kept)
+    for (const marked of ['href="style.css?v=job123"', 'href="about.html?v=job123#team"', 'src="js/more.js?v=job123"', 'src="lib/qrcode.js?v=job123"']) expect(html).toContain(marked)
+    expect(html).toContain('href="https://app-generator.example"')
+    expect(sources.get('index.html')).not.toContain('?v=')
+
+    // The marked page is what gets published; checking it again as a source still works.
+    const again = await validateWorkspace(await workspace({ 'index.html': html.replace(/<a href="https:[^>]*>[^<]*<\/a>/, ''), 'about.html': page('x'), 'style.css': 'p{}', 'app.js': '1', 'js/more.js': '2' }), { ...opts, jobId: 'job456' })
+    expect(again.files.get('index.html')!.toString()).toContain('href="style.css?v=job123"')
   })
 
   it('replaces a CSP the agent supplied and drops leading comments', async () => {
-    const out = await validateWorkspace(
+    const { files: out } = await validateWorkspace(
       await workspace({ 'index.html': `<!-- x --><!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src *"></head><body></body></html>` }),
       opts,
     )
@@ -60,16 +81,16 @@ describe('accepted apps', () => {
   })
 
   it('ships bundled libraries from the pristine copy, and only when referenced', async () => {
-    const used = await validateWorkspace(await workspace({ 'index.html': page('<script src="lib/qrcode.js"></script>'), 'lib/qrcode.js': 'tampered()' }), opts)
+    const { files: used } = await validateWorkspace(await workspace({ 'index.html': page('<script src="lib/qrcode.js"></script>'), 'lib/qrcode.js': 'tampered()' }), opts)
     expect(used.get('lib/qrcode.js')!.toString()).toBe('/* pristine */')
-    const unused = await validateWorkspace(await workspace({ 'index.html': page('hi'), 'lib/qrcode.js': 'x' }), opts)
+    const { files: unused } = await validateWorkspace(await workspace({ 'index.html': page('hi'), 'lib/qrcode.js': 'x' }), opts)
     expect(unused.has('lib/qrcode.js')).toBe(false)
   })
 
   it('does not count or read the library folder in the workspace', async () => {
     const files: Record<string, string> = { 'index.html': page('x'), 'lib/chart.js': 'x'.repeat(LIMITS.fileBytes + 1), 'lib/odd name!.js': 'x', 'lib/deep/er/still/x.js': 'x' }
     for (let i = 1; i < LIMITS.files; i++) files[`f${i}.txt`] = 'x'
-    const out = await validateWorkspace(await workspace(files), opts)
+    const { files: out } = await validateWorkspace(await workspace(files), opts)
     expect(out.size).toBe(LIMITS.files)
     expect([...out.keys()].some((path) => path.startsWith('lib/'))).toBe(false)
   })
@@ -77,7 +98,7 @@ describe('accepted apps', () => {
   it('ships the real bundled libraries to an app that uses them', async () => {
     const libsDir = join(import.meta.dirname, '../../sandbox/libs')
     const libs = new Map(await Promise.all((await readdir(libsDir)).filter((name) => name.endsWith('.js')).map(async (name) => [name, await readFile(join(libsDir, name))] as const)))
-    const out = await validateWorkspace(
+    const { files: out } = await validateWorkspace(
       await workspace({
         'index.html': page('<canvas id="chart"></canvas><div id="app"></div><script src="lib/chart.js"></script><script src="lib/preact.js"></script><script src="app.js"></script>'),
         'app.js': 'const { html, render } = htmPreact; render(html`<p>hi</p>`, document.getElementById("app")); new Chart(document.getElementById("chart"), { type: "bar", data: { labels: ["a"], datasets: [{ data: [1] }] } })',

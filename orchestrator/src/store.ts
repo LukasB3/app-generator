@@ -10,16 +10,21 @@ export type EventType = 'status' | 'file' | 'note'
 export interface App {
   id: string
   ownerId: string | null
+  // The job whose build is published and whose files a change would start from. Empty for an app that cannot be changed.
+  currentJobId: string | null
   createdAt: number
   expiresAt: number
 }
 
-// An app as its owner sees it in their list: with the request and state of its first build.
+// An app as its owner sees it in their list: the request it was first built
+// from, where it is published, and the state of the latest job on it.
 export interface OwnedApp {
   id: string
   prompt: string
-  status: JobStatus
   url: string | null
+  currentJobId: string | null
+  latestJobId: string
+  status: JobStatus
   createdAt: number
   expiresAt: number
 }
@@ -82,6 +87,8 @@ const MIGRATIONS = [
   // 4: accounts. Both stay empty for visitors who are not logged in.
   `ALTER TABLE jobs ADD COLUMN userId TEXT;
    ALTER TABLE apps ADD COLUMN ownerId TEXT;`,
+  // 5: changing an app. Apps built before this step have no stored files, so theirs stays empty.
+  `ALTER TABLE apps ADD COLUMN currentJobId TEXT;`,
 ]
 
 export class Store {
@@ -115,10 +122,11 @@ export class Store {
     }
   }
 
-  // A new job starts a new app under the same id, owned by whoever is logged in.
-  createJob({ id, prompt, ipHash, userId = null, expiresAt, now = Date.now() }: { id: string; prompt: string; ipHash: string; userId?: string | null; expiresAt: number; now?: number }) {
-    this.db.prepare('INSERT INTO apps (id, ownerId, createdAt, expiresAt) VALUES (?, ?, ?, ?)').run(id, userId, now, expiresAt)
-    this.db.prepare('INSERT INTO jobs (id, appId, prompt, ipHash, userId, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(id, id, prompt, ipHash, userId, now)
+  // A job either starts a new app, which gets the job's id, an owner if someone
+  // is logged in, and an end, or it changes the app named in `appId`.
+  createJob({ id, prompt, ipHash, userId = null, now = Date.now(), ...app }: { id: string; prompt: string; ipHash: string; userId?: string | null; now?: number } & ({ expiresAt: number } | { appId: string })) {
+    if ('expiresAt' in app) this.db.prepare('INSERT INTO apps (id, ownerId, createdAt, expiresAt) VALUES (?, ?, ?, ?)').run(id, userId, now, app.expiresAt)
+    this.db.prepare('INSERT INTO jobs (id, appId, prompt, ipHash, userId, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(id, 'appId' in app ? app.appId : id, prompt, ipHash, userId, now)
     this.addEvent(id, 'status', 'queued', now)
   }
 
@@ -127,13 +135,30 @@ export class Store {
   }
 
   getApp(id: string) {
-    return this.db.prepare('SELECT id, ownerId, createdAt, expiresAt FROM apps WHERE id = ?').get(id) as unknown as App | undefined
+    return this.db.prepare('SELECT id, ownerId, currentJobId, createdAt, expiresAt FROM apps WHERE id = ?').get(id) as unknown as App | undefined
+  }
+
+  setCurrentJob(appId: string, jobId: string) {
+    this.db.prepare('UPDATE apps SET currentJobId = ? WHERE id = ?').run(jobId, appId)
+  }
+
+  // Whether a job on this app is still waiting or running.
+  hasOpenJob(appId: string) {
+    return this.db.prepare(`SELECT 1 FROM jobs WHERE appId = ? AND status NOT IN ('done', 'failed') LIMIT 1`).get(appId) !== undefined
   }
 
   // The live apps of one account, newest first.
   appsOf(ownerId: string, now = Date.now()) {
     return this.db
-      .prepare('SELECT a.id, j.prompt, j.status, j.url, a.createdAt, a.expiresAt FROM apps a JOIN jobs j ON j.id = a.id WHERE a.ownerId = ? AND a.expiresAt > ? ORDER BY a.createdAt DESC')
+      .prepare(
+        `SELECT a.id, first.prompt, a.currentJobId, latest.id AS latestJobId, latest.status, a.createdAt, a.expiresAt,
+                (SELECT url FROM jobs WHERE appId = a.id AND url IS NOT NULL ORDER BY n DESC LIMIT 1) AS url
+         FROM apps a
+         JOIN jobs first ON first.id = a.id
+         JOIN jobs latest ON latest.n = (SELECT max(n) FROM jobs WHERE appId = a.id)
+         WHERE a.ownerId = ? AND a.expiresAt > ?
+         ORDER BY a.createdAt DESC`,
+      )
       .all(ownerId, now) as unknown as OwnedApp[]
   }
 

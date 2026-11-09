@@ -97,6 +97,17 @@ const checkUrl = (file: string, rawTag: string, attr: string, value: string, kno
   if (target !== '' && !known.has(target) && !known.has(`${target}/index.html`)) problems.push(`${file}: <${tag} ${attr}> points to a missing file (${safeName(target)})`)
 }
 
+// The host lets browsers keep a file for ten minutes. A changed app is
+// published under the same address, so links to its own files carry the job
+// that built them, and a new build is fetched at once. This runs after the
+// check and only adds a query, which the check ignores anyway.
+const versioned = (value: string, jobId: string) => {
+  const v = value.trim()
+  if (!v || v.startsWith('#') || v.includes('?') || /^data:/i.test(v)) return value
+  const [path, fragment] = v.split('#', 2)
+  return `${path}?v=${jobId}${fragment === undefined ? '' : `#${fragment}`}`
+}
+
 const attr = (el: T.Element, name: string) => el.attrs.find((a) => a.name === name)?.value
 
 const findElement = (node: T.ParentNode, tag: string): T.Element | undefined => {
@@ -137,12 +148,16 @@ const checkHtml = (file: string, source: string, known: Set<string>, opts: Valid
       if (tag === 'input' && attr(child, 'type')?.toLowerCase() === 'password') problems.push(`${file}: password fields are not allowed`)
       if (/\b(cc-|current-password|new-password|one-time-code)/i.test(attr(child, 'autocomplete') ?? '')) problems.push(`${file}: fields asking for credentials or card data are not allowed`)
       if (tag === 'link' && /\b(preconnect|dns-prefetch|prefetch|preload|modulepreload|prerender)\b/i.test(attr(child, 'rel') ?? '')) problems.push(`${file}: <link rel="${attr(child, 'rel')!.toLowerCase().slice(0, 20)}"> is not allowed`)
-      for (const { name, value } of child.attrs) {
+      for (const attribute of child.attrs) {
+        const { name, value } = attribute
         if (name.startsWith('on')) problems.push(`${file}: inline event handler ${name.slice(0, 20)}= is not allowed, use addEventListener in a .js file`)
         else if (name === 'srcdoc') problems.push(`${file}: srcdoc is not allowed`)
         else if (name === 'style' && /url\s*\(|@import|expression\s*\(/i.test(value)) problems.push(`${file}: style attributes must not load resources`)
         else if (name === 'srcset') for (const part of value.split(',')) checkUrl(file, tag, name, part.trim().split(/\s+/)[0] ?? '', known, problems)
-        else if (URL_ATTRS.has(name)) checkUrl(file, tag, name, value, known, problems)
+        else if (URL_ATTRS.has(name)) {
+          checkUrl(file, tag, name, value, known, problems)
+          if (name === 'src' || name === 'href') attribute.value = versioned(value, opts.jobId)
+        }
       }
       if (tag === 'style') checkCss(file, child.childNodes.map((n) => ('value' in n ? n.value : '')).join(''), known, problems)
       visit('content' in child ? (child as T.Template).content : child)
@@ -193,8 +208,10 @@ const checkScript = (file: string, source: string, problems: string[]) => {
   if (/\bimportScripts\s*\(|\bnavigator\s*\.\s*serviceWorker\b/.test(source)) problems.push(`${file}: workers loading other scripts are not allowed`)
 }
 
-// Returns the publishable files. Throws ValidationError listing every problem,
-// phrased so it can be handed back to the agent for one repair attempt.
+// Returns the publishable files, and the text of the agent's own files exactly
+// as it was checked, for a later change to start from. Throws ValidationError
+// listing every problem, phrased so it can be handed back to the agent for one
+// repair attempt.
 export const validateWorkspace = async (root: string, opts: ValidateOptions) => {
   const problems: string[] = []
   const paths = await walk(root, problems)
@@ -242,5 +259,5 @@ export const validateWorkspace = async (root: string, opts: ValidateOptions) => 
   // the ones the app actually references.
   const referenced = [...sources.values()].join('\n')
   for (const [name, bytes] of opts.libs) if (referenced.includes(`lib/${name}`)) out.set(`lib/${name}`, bytes)
-  return out
+  return { files: out, sources }
 }

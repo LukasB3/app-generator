@@ -8,6 +8,14 @@ import type { Config } from './config.js'
 const run = promisify(execFile)
 
 export class PublishError extends Error {}
+export class AppGone extends Error {}
+
+export interface PublishHooks {
+  // Asked once the working copy is held: is the app still meant to be online?
+  isLive: () => boolean
+  // Called when the files are in the repository, before the wait for the page.
+  pushed: () => Promise<void>
+}
 
 // Publishing and cleanup share one working copy, so they take turns.
 let turn: Promise<unknown> = Promise.resolve()
@@ -63,10 +71,13 @@ export const createPublisher = (cfg: Config) => {
 
   // The app id decides where the files go. The job id is the marker in the
   // page that shows this build is the one being served.
-  return async (appId: string, jobId: string, files: Map<string, Buffer>) => {
+  return async (appId: string, jobId: string, files: Map<string, Buffer>, { isLive, pushed }: PublishHooks) => {
     const url = `${cfg.APPS_BASE_URL}/apps/${appId}/`
     await withRepo(async () => {
       await sync()
+      // A change can wait in the queue past the end of its app. Publishing it
+      // then would bring back a page the cleanup has just removed.
+      if (!isLive()) throw new AppGone()
       const appDir = join(repoDir, 'apps', appId)
       await rm(appDir, { recursive: true, force: true })
       for (const [path, bytes] of files) {
@@ -77,6 +88,7 @@ export const createPublisher = (cfg: Config) => {
       await git('commit', '--quiet', '-m', `publish app ${appId}`)
       await git('push', '--quiet', 'origin', 'HEAD:main')
     })
+    await pushed()
     await waitUntilLive(jobId, url)
     return url
   }

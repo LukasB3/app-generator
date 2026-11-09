@@ -17,7 +17,7 @@
       <h1>My apps</h1>
 
       <section id="login" hidden>
-        <p class="lede">Log in with your e-mail address and the apps you build stay online for ten days instead of one. You find them all here.</p>
+        <p class="lede">Log in with your e-mail address and the apps you build stay online for ten days instead of one. You find them all here and can change them with another request.</p>
 
         <form id="ask" class="entry" novalidate>
           <label for="email">E-mail address</label>
@@ -37,9 +37,19 @@
       </section>
 
       <section id="mine" hidden>
-        <p class="lede">Logged in as <strong id="who"></strong>. Apps you build while logged in stay online for ten days. <button id="logout" class="quiet" type="button">Log out</button></p>
+        <p class="lede">Logged in as <strong id="who"></strong>. Apps you build while logged in stay online for ten days and can be changed. <button id="logout" class="quiet" type="button">Log out</button></p>
         <ul id="apps" class="apps"></ul>
         <p id="none" hidden>No apps yet. <a href="./">Build one</a> and it shows up here.</p>
+
+        <form id="change" class="entry" novalidate hidden>
+          <label for="wish">What should change?</label>
+          <textarea id="wish" name="wish" rows="3" maxlength="1000" required placeholder="Make the buttons bigger and add a dark mode"></textarea>
+          <div id="change-captcha"></div>
+          <p id="change-error" class="notice" role="alert" hidden></p>
+          <button id="apply" class="primary" type="submit" disabled>Change the app</button>
+          <button id="keep" class="quiet" type="button">Leave it as it is</button>
+          <p class="consent">The app keeps its address and its end date. Everything it does not need to touch stays as it is.</p>
+        </form>
       </section>
 
       <p id="notice" class="notice" role="alert" hidden></p>

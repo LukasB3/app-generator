@@ -22,7 +22,7 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 ## Trust boundaries
 
 1. **Internet → orchestrator API.** Untrusted HTTP. Input is a prompt of limited length and a captcha token, validated with a schema, and optionally a login token. Job ids in URLs must match a fixed pattern before they touch the database.
-2. **Orchestrator → launcher → sandbox.** The orchestrator cannot talk to Docker. It hands a job id, a job token and the prompt to a root-owned launcher, which starts the container with fixed settings. Exactly three things reach the container: the prompt on stdin, the token in the environment, and an empty workspace with the bundled libraries. The agent's command line is fixed in the image.
+2. **Orchestrator → launcher → sandbox.** The orchestrator cannot talk to Docker. It hands a job id, a job token and the prompt to a root-owned launcher, which starts the container with fixed settings. Exactly three things reach the container: the prompt on stdin, the token in the environment, and a workspace. The workspace holds the bundled libraries and, when an existing app is being changed, that app's files as they last passed the checker. The agent's command line is fixed in the image.
 3. **Sandbox → key proxy.** The only network path out of the sandbox. The proxy treats the container as hostile.
 4. **Sandbox → orchestrator (the workspace).** Whatever the agent wrote is hostile data. It is read by the checker and never executed on the server.
 5. **Orchestrator → GitHub.** Git runs with a deploy key scoped to one repository and a pinned host key.
@@ -88,6 +88,9 @@ The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'n
 - A token that does not verify ends the request. It is never read as "not logged in", which would hand the visitor an anonymous app they believe is theirs.
 - An account costs nothing to create, so it buys nothing an address does not already get: the hourly limit and the daily budget are counted per address and per account. What an account changes is the lifetime of its apps.
 - The list of someone's apps is answered only for the account in a verified token. Watching a build still needs nothing but the job id, as before.
+- Only the owner can change an app, and only one change runs at a time. Anyone else gets the same answer as for an app that does not exist. A change counts against the same limits and budgets as a new app and never moves the day the app is removed.
+- A change starts from files an agent wrote earlier. Passing the checker once earns them no trust: the whole app goes through the checker again, and what is stored is the text the checker read, not what was in the workspace afterwards. Whatever those files say to the next agent, they were written at the request of the same account.
+- A change that is still waiting when its app ends is not published: the publisher asks again once it holds the repository, the same moment the cleanup decides.
 - Anyone can ask for a login mail to any address. The form is behind a captcha that Supabase checks, and Supabase limits how often mail goes out, in total and per address.
 
 ## Known trade-offs

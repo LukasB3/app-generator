@@ -18,15 +18,16 @@ flowchart LR
     C --> G[Publisher<br/>git + deploy key]
   end
   P -->|vetted Messages calls| A[Anthropic API]
-  G -->|apps/&lt;job-id&gt;/| R[app-generator-apps<br/>GitHub Pages]
+  G -->|apps/&lt;app-id&gt;/| R[app-generator-apps<br/>GitHub Pages]
   R -->|link| V
 ```
 
 1. The website sends the prompt and a Turnstile token to the orchestrator.
 2. The orchestrator applies the limits and has a small model screen the prompt: gibberish and abusive requests are turned away with a message before anything is queued. Then it queues the job and streams progress back (`queued → preparing → coding → checking → publishing → done`), including the files the agent writes.
-3. For each job a fresh container starts with an empty workspace. The agent has the Read, Write, Edit, Glob and Grep tools and nothing else.
+3. For each job a fresh container starts with a workspace that holds only the bundled libraries. The agent has the Read, Write, Edit, Glob and Grep tools and nothing else.
 4. When the agent stops, the checker validates the workspace. If it finds problems, the agent gets one repair round with the findings.
-5. The publisher commits the checked files to `apps/<job-id>/` in a dedicated repository and waits until GitHub Pages serves them.
+5. The publisher commits the checked files to `apps/<app-id>/` in a dedicated repository and waits until GitHub Pages serves them.
+6. Someone who was logged in can change their app later with another request. That is a new job on the same app: it starts from the app's files as they last passed the checker, the whole result is checked again, and it is published at the same address. Links from the page to its own files carry the id of the job that built them, because the host lets browsers keep a file for ten minutes.
 
 ## Security model
 
@@ -40,7 +41,7 @@ flowchart LR
 | Malicious output is published | The checker allows only `.html`, `.css`, `.js`, `.json` and `.txt` within size and count limits, rejects symlinks, secrets, inline scripts, external or absolute URLs, iframes, password and card fields, and forms that submit anywhere. HTML is re-serialised with a strict CSP (`connect-src 'none'`, `form-action 'none'`, `script-src 'self'`) and a visible "AI-generated" badge. |
 | Injection through the prompt | The prompt reaches the agent on stdin only. Job ids are generated server-side and are the only request-derived value in any path or command. Every subprocess is started with an argument array, never through a shell. |
 | Nonsense or abusive requests | One short classification call (Claude Haiku 5.5, through the key proxy with a job token) before a job is queued. It is a courtesy filter, not a boundary: its answer is one of three fixed values, and a prompt that fools it only reaches the sandbox and the checker like any other. If the call fails, the request goes through. |
-| Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online. |
+| Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online, and that its owner can change it. For everyone else the change route answers as if the app did not exist. |
 | Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
 The full reasoning, including the trade-offs that remain, is in [docs/threat-model.md](docs/threat-model.md).

@@ -1,9 +1,10 @@
 import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Config } from './config.js'
-import { createPublisher } from './publish.js'
+import { AppGone, createPublisher } from './publish.js'
 import { AgentError, JobTimeout, killContainer, runAgent } from './sandbox.js'
-import type { Job, JobStatus } from './store.js'
+import { saveSources, seedWorkspace } from './sources.js'
+import type { Job, JobStatus, Store } from './store.js'
 import { signJobToken } from './token.js'
 import { ValidationError, validateWorkspace } from './validate.js'
 
@@ -21,6 +22,7 @@ export const publicError = (error: unknown) => {
   if (error instanceof JobTimeout) return 'The build took too long and was stopped.'
   if (error instanceof ValidationError) return `The generated app did not pass the safety checks: ${error.problems.slice(0, 3).join('; ')}`
   if (error instanceof AgentError) return 'The coding agent declined or could not finish this request. Try describing a simple, harmless app.'
+  if (error instanceof AppGone) return 'This app has been removed in the meantime, so it was not changed.'
   return 'Something went wrong while building your app.'
 }
 
@@ -39,10 +41,13 @@ export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SEC
   return Number(((await res.json()) as { costMicroUsd: unknown }).costMicroUsd) || 0
 }
 
-export const createPipeline = (cfg: Config): Pipeline => {
-  const publish = createPublisher(cfg)
+// The agent and the publisher can be swapped out, which is how the tests run
+// the steps in between without a container or a remote repository.
+export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCurrentJob'>, run = runAgent, publish = createPublisher(cfg)): Pipeline => {
 
   return async (job, report) => {
+    // A first build shares its id with its app. Any other job changes an app that exists.
+    const edit = job.appId !== job.id
     const deadline = Date.now() + cfg.JOB_TIMEOUT_S * 1000
     const workspace = join(cfg.DATA_DIR, 'jobs', job.id)
     const token = signJobToken(cfg.PROXY_SIGNING_SECRET, job.id, Math.ceil(deadline / 1000))
@@ -52,8 +57,10 @@ export const createPipeline = (cfg: Config): Pipeline => {
       await rm(workspace, { recursive: true, force: true })
       await mkdir(workspace, { recursive: true })
       await cp(cfg.LIBS_DIR, join(workspace, 'lib'), { recursive: true })
+      // A change starts from the files that passed the checker last time. They get no trust for that: the whole app is checked again.
+      if (edit && !(await seedWorkspace(cfg, job.appId, workspace))) throw new AppGone()
 
-      const agent = (problems?: string[]) => runAgent(cfg, { jobId: job.id, request: job.prompt, problems, token, deadline, onFile: report.file })
+      const agent = (problems?: string[]) => run(cfg, { jobId: job.id, request: job.prompt, edit, problems, token, deadline, onFile: report.file })
       const check = () =>
         validateWorkspace(workspace, {
           jobId: job.id,
@@ -66,7 +73,7 @@ export const createPipeline = (cfg: Config): Pipeline => {
       await agent()
 
       report.status('checking')
-      const files = await check().catch(async (error: unknown) => {
+      const { files, sources } = await check().catch(async (error: unknown) => {
         if (!(error instanceof ValidationError)) throw error
         // One repair round: the checker's findings go back to the agent.
         report.note('The checker found problems, asking the agent to fix them')
@@ -77,7 +84,17 @@ export const createPipeline = (cfg: Config): Pipeline => {
       })
 
       report.status('publishing')
-      return await publish(job.appId, job.id, files)
+      return await publish(job.appId, job.id, files, {
+        isLive: () => (apps.getApp(job.appId)?.expiresAt ?? 0) > Date.now(),
+        // From here on the repository holds this build, whether or not the page
+        // shows up in time, so this is what a later change has to start from.
+        // Only an app with an owner can be changed.
+        pushed: async () => {
+          if (!apps.getApp(job.appId)?.ownerId) return
+          await saveSources(cfg, job.appId, sources)
+          apps.setCurrentJob(job.appId, job.id)
+        },
+      })
     } finally {
       await killContainer(cfg, job.id)
       await rm(workspace, { recursive: true, force: true })
