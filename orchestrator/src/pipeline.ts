@@ -1,6 +1,7 @@
 import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Config } from './config.js'
+import { DatabaseDown, gateway } from './gate.js'
 import { AppGone, createPublisher } from './publish.js'
 import { AgentError, JobTimeout, killContainer, runAgent } from './sandbox.js'
 import { saveSources, seedWorkspace } from './sources.js'
@@ -23,6 +24,7 @@ export const publicError = (error: unknown) => {
   if (error instanceof ValidationError) return `The generated app did not pass the safety checks: ${error.problems.slice(0, 3).join('; ')}`
   if (error instanceof AgentError) return 'The coding agent declined or could not finish this request. Try describing a simple, harmless app.'
   if (error instanceof AppGone) return 'This app has been removed in the meantime, so it was not changed.'
+  if (error instanceof DatabaseDown) return 'The database for apps is not available at the moment. Please try again in a few minutes.'
   return 'Something went wrong while building your app.'
 }
 
@@ -43,16 +45,19 @@ export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SEC
 
 // The agent and the publisher can be swapped out, which is how the tests run
 // the steps in between without a container or a remote repository.
-export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCurrentJob'>, run = runAgent, publish = createPublisher(cfg)): Pipeline => {
-
+export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCurrentJob' | 'setHasDb'>, run = runAgent, publish = createPublisher(cfg), gate = gateway(cfg)): Pipeline => {
   return async (job, report) => {
     // A first build shares its id with its app. Any other job changes an app that exists.
     const edit = job.appId !== job.id
     const deadline = Date.now() + cfg.JOB_TIMEOUT_S * 1000
     const workspace = join(cfg.DATA_DIR, 'jobs', job.id)
     const token = signJobToken(cfg.PROXY_SIGNING_SECRET, job.id, Math.ceil(deadline / 1000))
+    const gateToken = gate.token(job.appId, job.id, Math.ceil(deadline / 1000))
     try {
       report.status('preparing')
+      // An app that has tables cannot be changed without knowing them. If the
+      // database is down, this fails here, before anything is spent.
+      const tables = apps.getApp(job.appId)?.hasDb ? await gate.tables(job.appId) : []
       const libs = await loadLibs(cfg.LIBS_DIR)
       await rm(workspace, { recursive: true, force: true })
       await mkdir(workspace, { recursive: true })
@@ -60,20 +65,31 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
       // A change starts from the files that passed the checker last time. They get no trust for that: the whole app is checked again.
       if (edit && !(await seedWorkspace(cfg, job.appId, workspace))) throw new AppGone()
 
-      const agent = (problems?: string[]) => run(cfg, { jobId: job.id, request: job.prompt, edit, problems, token, deadline, onFile: report.file })
-      const check = () =>
-        validateWorkspace(workspace, {
+      const agent = (problems?: string[]) => run(cfg, { jobId: job.id, request: job.prompt, edit, problems, token, gateToken, deadline, onFile: report.file })
+      const check = async () => {
+        // The agent cannot touch the database. It can ask the gateway for
+        // tables, and the gateway writes that down. A gateway that cannot be
+        // asked means no tables: the agent had no tools then either.
+        const changes = await gate.plan(job.id).catch((error: unknown) => {
+          console.error(`what job ${job.id} asked of the database is unknown`, error)
+          return []
+        })
+        const hasTables = tables.length > 0 || changes.some((change) => change.action === 'create_table')
+        const checked = await validateWorkspace(workspace, {
           jobId: job.id,
           libs,
           badgeUrl: cfg.WEB_ORIGIN,
-          extraSecrets: [token, cfg.PROXY_SIGNING_SECRET, cfg.TURNSTILE_SECRET, cfg.IP_HASH_SECRET, cfg.GATE_SIGNING_SECRET ?? ''],
+          extraSecrets: [token, gate.enabled ? gateToken : '', cfg.PROXY_SIGNING_SECRET, cfg.TURNSTILE_SECRET, cfg.IP_HASH_SECRET, cfg.GATE_SIGNING_SECRET ?? ''],
+          database: hasTables ? gate.database(job.appId) : undefined,
         })
+        return { ...checked, changes }
+      }
 
       report.status('coding')
       await agent()
 
       report.status('checking')
-      const { files, sources } = await check().catch(async (error: unknown) => {
+      const { files, sources, changes } = await check().catch(async (error: unknown) => {
         if (!(error instanceof ValidationError)) throw error
         // One repair round: the checker's findings go back to the agent.
         report.note('The checker found problems, asking the agent to fix them')
@@ -82,6 +98,14 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
         report.status('checking')
         return check()
       })
+
+      // Only now, with the checker passed, does anything happen in the
+      // database, and all of it at once. Tables are only ever added, so the
+      // version that is online keeps working if publishing fails after this.
+      if (changes.length) {
+        await gate.commit(job.appId, changes)
+        apps.setHasDb(job.appId)
+      }
 
       report.status('publishing')
       return await publish(job.appId, job.id, files, {

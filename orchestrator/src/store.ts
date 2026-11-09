@@ -12,6 +12,8 @@ export interface App {
   ownerId: string | null
   // The job whose build is published and whose files a change would start from. Empty for an app that cannot be changed.
   currentJobId: string | null
+  // 1 once the app has tables in the database, 0 before.
+  hasDb: number
   createdAt: number
   expiresAt: number
 }
@@ -89,6 +91,8 @@ const MIGRATIONS = [
    ALTER TABLE apps ADD COLUMN ownerId TEXT;`,
   // 5: changing an app. Apps built before this step have no stored files, so theirs stays empty.
   `ALTER TABLE apps ADD COLUMN currentJobId TEXT;`,
+  // 6: apps with tables in the database. Such an app cannot be changed without the database.
+  `ALTER TABLE apps ADD COLUMN hasDb INTEGER NOT NULL DEFAULT 0;`,
 ]
 
 export class Store {
@@ -135,11 +139,15 @@ export class Store {
   }
 
   getApp(id: string) {
-    return this.db.prepare('SELECT id, ownerId, currentJobId, createdAt, expiresAt FROM apps WHERE id = ?').get(id) as unknown as App | undefined
+    return this.db.prepare('SELECT id, ownerId, currentJobId, hasDb, createdAt, expiresAt FROM apps WHERE id = ?').get(id) as unknown as App | undefined
   }
 
   setCurrentJob(appId: string, jobId: string) {
     this.db.prepare('UPDATE apps SET currentJobId = ? WHERE id = ?').run(jobId, appId)
+  }
+
+  setHasDb(appId: string) {
+    this.db.prepare('UPDATE apps SET hasDb = 1 WHERE id = ?').run(appId)
   }
 
   // Whether a job on this app is still waiting or running.

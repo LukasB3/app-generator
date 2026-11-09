@@ -179,3 +179,81 @@ describe('rejected apps', () => {
     await expect(validateWorkspace(dir, { ...opts, extraSecrets: ['the-real-secret-value'] })).rejects.toThrow(/server secret/)
   })
 })
+
+describe('apps with tables', () => {
+  const database = { url: 'https://project.example', key: 'public-key', prefix: 'ajob123_' }
+  const withDb = { ...opts, libs: new Map([...opts.libs, ['db.js', Buffer.from('/* pristine db */')]]), database }
+  const app = { 'index.html': page('<ul id="list"></ul><script src="lib/db.js"></script><script src="app.js"></script>'), 'app.js': 'db.table("entries").subscribe((rows) => { document.getElementById("list").textContent = rows.length })' }
+  const problemsWith = async (files: Record<string, string>, options: typeof opts & { database?: typeof database } = withDb) => {
+    try {
+      await validateWorkspace(await workspace(files), options)
+      return []
+    } catch (error) {
+      if (error instanceof ValidationError) return error.problems
+      throw error
+    }
+  }
+
+  it('tells a page that loads the database library where its tables are, and lets it reach them and nothing else', async () => {
+    const { files } = await validateWorkspace(await workspace(app), withDb)
+    const html = files.get('index.html')!.toString()
+    const policy = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html)![1]!
+    expect(policy).toBe(CSP.replace("connect-src 'none'", 'connect-src https://project.example/rest/v1/'))
+    expect(policy).toContain("script-src 'self'")
+    expect(policy).toContain("form-action 'none'")
+    expect(html).toContain('<meta name="app-generator-db" content="{&quot;url&quot;:&quot;https://project.example&quot;,&quot;key&quot;:&quot;public-key&quot;,&quot;prefix&quot;:&quot;ajob123_&quot;}">')
+    expect(html.indexOf('Content-Security-Policy')).toBeLessThan(html.indexOf('app-generator-db'))
+    expect(html).toContain('AI-generated demo from App Generator. Anything entered here is public.')
+    expect(files.get('lib/db.js')!.toString()).toBe('/* pristine db */')
+  })
+
+  it('keeps every other page closed, also in an app that has tables', async () => {
+    const { files } = await validateWorkspace(await workspace({ ...app, 'about.html': page('<p>About</p>') }), withDb)
+    const about = files.get('about.html')!.toString()
+    expect(about).toContain(`content="${CSP}"`)
+    expect(about).not.toContain('app-generator-db')
+    expect(about).not.toContain('is public')
+    // And an app without tables is published exactly as before.
+    const plain = await validateWorkspace(await workspace({ 'index.html': page('<p>Hi</p>') }), opts)
+    expect(plain.files.get('index.html')!.toString()).toContain(`content="${CSP}"`)
+  })
+
+  it('finds the library from a page in a folder', async () => {
+    const { files } = await validateWorkspace(await workspace({ ...app, 'admin/index.html': page('<script src="../lib/db.js"></script>') }), withDb)
+    expect(files.get('admin/index.html')!.toString()).toContain('app-generator-db')
+  })
+
+  it('drops settings the agent wrote in our name', async () => {
+    const forged = '<meta name="app-generator-db" content="{&quot;url&quot;:&quot;https://evil.example&quot;,&quot;key&quot;:&quot;k&quot;,&quot;prefix&quot;:&quot;aother_&quot;}"><meta name="App-Generator-Job" content="forged">'
+    const { files } = await validateWorkspace(await workspace({ ...app, 'index.html': page('<script src="lib/db.js"></script><script src="app.js"></script>', forged) }), withDb)
+    const html = files.get('index.html')!.toString()
+    expect(html).not.toContain('evil.example')
+    expect(html).not.toContain('forged')
+    expect(html.match(/app-generator-db/g)).toHaveLength(1)
+    // Also where the checker adds none of its own.
+    const plain = await validateWorkspace(await workspace({ 'index.html': page('<p>Hi</p>', forged) }), opts)
+    expect(plain.files.get('index.html')!.toString()).not.toContain('app-generator-db')
+  })
+
+  it('rejects a page that loads the library when the app has no table', async () => {
+    const problems = await problemsWith(app, { ...withDb, database: undefined })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatch(/^index\.html: loads lib\/db\.js, but the app has no table\. Ask for one with the create_table tool\./)
+  })
+
+  it.each([
+    ['innerHTML', 'list.innerHTML = rows.map((row) => `<li>${row.text}</li>`).join("")'],
+    ['outerHTML', 'item.outerHTML = row.text'],
+    ['insertAdjacentHTML', 'list.insertAdjacentHTML("beforeend", row.text)'],
+    ['document.write', 'document . write(row.text)'],
+    ['dangerouslySetInnerHTML', 'html`<p dangerouslySetInnerHTML=${{ __html: row.text }} />`'],
+  ])('rejects %s in an app with tables, and only there', async (_name, code) => {
+    expect(await problemsWith({ ...app, 'app.js': code })).toEqual([expect.stringMatching(/^app\.js: innerHTML, outerHTML, insertAdjacentHTML and document\.write are not allowed in an app with a database/)])
+    expect(await problemsWith({ 'index.html': page('<script src="app.js"></script>'), 'app.js': code }, opts)).toEqual([])
+  })
+
+  it('rejects a database token in a file, as it does the token for the model', async () => {
+    const token = `agd1.${'a'.repeat(20)}.${'b'.repeat(20)}.1900000000.${'0'.repeat(64)}`
+    expect(await problemsWith({ ...app, 'notes.txt': `found ${token}` })).toEqual(['notes.txt: contains what looks like a sandbox credential'])
+  })
+})

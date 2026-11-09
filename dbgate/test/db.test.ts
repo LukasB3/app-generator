@@ -26,13 +26,19 @@ const urlFor = (user?: string, password?: string) => {
 }
 
 describe('readiness', () => {
-  it('is not ready while the database is out of reach, and asks again the next time', async () => {
+  it('is not ready while the database is out of reach, and asks again later', async () => {
     const asItShouldBe = { powerful: false, member: false, usable: [], creatable: [], equipped: true }
     const query = vi.fn().mockRejectedValueOnce(new Error('connect ECONNREFUSED')).mockResolvedValue({ rows: [asItShouldBe] })
     const logged: string[] = []
-    const gate = createGate({ query } as unknown as pg.Pool, { log: (line) => logged.push(line) })
+    let time = 1_000_000
+    const gate = createGate({ query } as unknown as pg.Pool, { log: (line) => logged.push(line), now: () => time })
 
     await expect(gate.ready()).rejects.toThrow('the database is out of reach or not set up: connect ECONNREFUSED')
+    // For half a minute the answer comes without asking the database again.
+    time += 29_000
+    await expect(gate.ready()).rejects.toBeInstanceOf(NotReady)
+    expect(query).toHaveBeenCalledTimes(1)
+    time += 2_000
     await expect(gate.ready()).resolves.toBeUndefined()
     await gate.ready()
     expect(query).toHaveBeenCalledTimes(2)
@@ -125,12 +131,14 @@ describe.skipIf(!url)('gateway against Postgres', () => {
 
       await asAnon(`insert into ${table('entries')} (author, stars) values ('Ada', 5)`)
       const { rows } = await asAnon(`select * from ${table('entries')}`)
-      expect(rows).toEqual([{ id: '1', created_at: expect.any(Date), author: 'Ada', stars: 5 }])
+      expect(rows).toEqual([{ id: '1', created_at: expect.any(Date), updated_at: expect.any(Date), author: 'Ada', stars: 5 }])
+      expect(await gate.state(APP)).toEqual({ tables: await gate.tables(APP), overall: 1 })
 
       await expect(asAnon(`update ${table('entries')} set stars = 1`)).rejects.toMatchObject(denied)
       await expect(asAnon(`delete from ${table('entries')}`)).rejects.toMatchObject(denied)
       await expect(asAnon(`truncate ${table('entries')}`)).rejects.toMatchObject(denied)
       await expect(asAnon(`insert into ${table('entries')} (author, created_at) values ('Ada', '2000-01-01')`)).rejects.toMatchObject(denied)
+      await expect(asAnon(`insert into ${table('entries')} (author, updated_at) values ('Ada', '2000-01-01')`)).rejects.toMatchObject(denied)
       await expect(asAnon(`insert into ${table('entries')} (id, author) overriding system value values (99, 'Ada')`)).rejects.toMatchObject(denied)
       await expect(asAnon(`alter table ${table('entries')} add column extra text`)).rejects.toMatchObject(denied)
       await expect(asAnon(`drop table ${table('entries')}`)).rejects.toMatchObject(denied)
@@ -150,7 +158,24 @@ describe.skipIf(!url)('gateway against Postgres', () => {
       expect((await asAnon(`delete from ${table('todos')} where title = 'ship'`)).rowCount).toBe(1)
       expect((await asAnon(`select title, done from ${table('todos')}`)).rows).toEqual([{ title: 'write tests', done: true }])
       await expect(asAnon(`update ${table('todos')} set created_at = now()`)).rejects.toMatchObject(denied)
+      await expect(asAnon(`update ${table('todos')} set updated_at = '2000-01-01'`)).rejects.toMatchObject(denied)
       await expect(asAnon(`update ${table('todos')} set id = 7`)).rejects.toThrow(/can only be updated to DEFAULT/)
+    })
+
+    it('stamps a row with the time of every write', async () => {
+      await gate.commit(APP, [todos])
+      await asAnon(`insert into ${table('todos')} (title) values ('one'), ('two')`)
+      const stamp = async (title: string) => (await asAnon(`select updated_at from ${table('todos')} where title = '${title}'`)).rows[0].updated_at.getTime()
+      const [one, two] = [await stamp('one'), await stamp('two')]
+      await asAnon(`update ${table('todos')} set done = true where title = 'one'`)
+      expect(await stamp('one')).toBeGreaterThan(one)
+      expect(await stamp('one')).toBeGreaterThan(two)
+      expect(await stamp('two')).toBe(two)
+      // The newest stamp and the number of rows together tell a page whether anything changed.
+      const latest = async () => (await asAnon(`select max(updated_at) as at, count(*)::int as n from ${table('todos')}`)).rows[0]
+      const before = await latest()
+      await asAnon(`delete from ${table('todos')} where title = 'two'`)
+      expect((await latest()).n).toBe(before.n - 1)
     })
 
     it('adds a column with the rights of its table', async () => {

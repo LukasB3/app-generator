@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "db": {
+      "type": "http",
+      "url": "http://ag-dbgate:8080/mcp",
+      "headers": { "Authorization": "Bearer ${AG_DB_TOKEN}" }
+    }
+  }
+}

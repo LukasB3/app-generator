@@ -1,24 +1,35 @@
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import { join, posix } from 'node:path'
 import { parse, serialize, type DefaultTreeAdapterTypes as T } from 'parse5'
-import { TOKEN_PATTERN } from './token.js'
+import type { Database } from './gate.js'
+import { GATE_TOKEN_PATTERN, TOKEN_PATTERN } from './token.js'
 
 // Everything the agent wrote is treated as hostile. Only what passes these
 // checks is published, and HTML is re-serialised with our own CSP on top.
 
 export const LIMITS = { files: 30, depth: 3, fileBytes: 300_000, totalBytes: 1_500_000 }
 
-export const CSP = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "media-src 'self' data: blob:",
-  "font-src 'self'",
-  "connect-src 'none'",
-  "form-action 'none'",
-  "base-uri 'none'",
-].join('; ')
+// A page may send requests nowhere, with one exception: a page of an app with
+// tables may reach the Data API of the database, and only that path.
+const policy = (connect = "'none'") =>
+  [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' data: blob:",
+    "font-src 'self'",
+    `connect-src ${connect}`,
+    "form-action 'none'",
+    "base-uri 'none'",
+  ].join('; ')
+export const CSP = policy()
+const DB_LIB = 'lib/db.js'
+// Rows in a table come from strangers. Written into a page as HTML, their
+// markup would become part of it for every later visitor. Scripts in it stay
+// blocked, but a fake form or a redirect would not. This catches the honest
+// mistake; a script that is out to do it can hide the name.
+const HTML_SINKS = /\b(innerHTML|outerHTML|insertAdjacentHTML|dangerouslySetInnerHTML|setHTMLUnsafe|createContextualFragment)\b|\bdocument\s*\.\s*write(ln)?\s*\(/
 
 const EXTENSIONS = new Set(['html', 'css', 'js', 'json', 'txt'])
 const SEGMENT = /^[a-z0-9][a-z0-9._-]{0,63}$/i
@@ -31,6 +42,7 @@ const SECRETS: [string, RegExp][] = [
   ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ['a Slack token', /\bxox[baprs]-[A-Za-z0-9-]{10,}/],
   ['a sandbox credential', TOKEN_PATTERN],
+  ['a sandbox credential', GATE_TOKEN_PATTERN],
 ]
 const ALLOWED_ABSOLUTE = /^https?:\/\/www\.w3\.org\//
 
@@ -45,6 +57,8 @@ export interface ValidateOptions {
   libs: Map<string, Buffer>
   badgeUrl: string
   extraSecrets?: string[]
+  // Set when the app has tables: where its pages find them.
+  database?: Database
 }
 
 const safeName = (path: string) => (path.split('/').every((s) => SEGMENT.test(s)) ? path : '(unnamed file)')
@@ -128,8 +142,17 @@ const element = (tagName: string, attrs: Record<string, string>, parentNode: T.P
   parentNode,
 })
 
+const resolved = (file: string, ref: string) => {
+  try {
+    return localTarget(file, ref)
+  } catch {
+    return null
+  }
+}
+
 const checkHtml = (file: string, source: string, known: Set<string>, opts: ValidateOptions, problems: string[]) => {
   const doc = parse(source)
+  let usesDatabase = false
   // Nothing the agent wrote may precede our CSP tag except the doctype and <html>.
   doc.childNodes = doc.childNodes.filter((n) => n.nodeName !== '#comment')
   const visit = (node: T.ParentNode) => {
@@ -137,13 +160,14 @@ const checkHtml = (file: string, source: string, known: Set<string>, opts: Valid
       if (!('tagName' in child)) return true
       const tag = child.tagName
       const httpEquiv = attr(child, 'http-equiv')?.toLowerCase()
-      // Our own policy and job marker replace whatever the agent supplied.
-      if (tag === 'meta' && (httpEquiv === 'content-security-policy' || attr(child, 'name') === 'app-generator-job')) return false
+      // Our own policy and our own meta tags replace whatever the agent supplied.
+      if (tag === 'meta' && (httpEquiv === 'content-security-policy' || attr(child, 'name')?.toLowerCase().startsWith('app-generator-'))) return false
       if (BANNED_TAGS.has(tag)) problems.push(`${file}: <${tag}> is not allowed`)
       if (tag === 'meta' && httpEquiv === 'refresh') problems.push(`${file}: meta refresh is not allowed`)
       if (tag === 'script') {
         if (attr(child, 'src') === undefined) problems.push(`${file}: inline <script> is not allowed, move the code into a .js file`)
         else if (!/\.js([?#]|$)/.test(attr(child, 'src')!.trim())) problems.push(`${file}: <script src> must load a .js file`)
+        else if (resolved(file, attr(child, 'src')!) === DB_LIB) usesDatabase = true
       }
       if (tag === 'input' && attr(child, 'type')?.toLowerCase() === 'password') problems.push(`${file}: password fields are not allowed`)
       if (/\b(cc-|current-password|new-password|one-time-code)/i.test(attr(child, 'autocomplete') ?? '')) problems.push(`${file}: fields asking for credentials or card data are not allowed`)
@@ -169,13 +193,17 @@ const checkHtml = (file: string, source: string, known: Set<string>, opts: Valid
   const head = findElement(doc, 'head')
   const body = findElement(doc, 'body')
   if (!head || !body) return void problems.push(`${file}: not a complete HTML document`)
+  if (usesDatabase && !opts.database) problems.push(`${file}: loads ${DB_LIB}, but the app has no table. Ask for one with the create_table tool. If you have no such tool, the database is not available: keep the data in the browser and do not load ${DB_LIB}`)
+  // Only a page that loads the database library is told where the tables are and may reach them.
+  const database = usesDatabase ? opts.database : undefined
   head.childNodes.unshift(
-    element('meta', { 'http-equiv': 'Content-Security-Policy', content: CSP }, head),
+    element('meta', { 'http-equiv': 'Content-Security-Policy', content: database ? policy(`${database.url}/rest/v1/`) : CSP }, head),
     element('meta', { name: 'app-generator-job', content: opts.jobId }, head),
     element('meta', { name: 'referrer', content: 'no-referrer' }, head),
+    ...(database ? [element('meta', { name: 'app-generator-db', content: JSON.stringify(database) }, head)] : []),
   )
   const badge = element('a', { href: opts.badgeUrl, rel: 'noopener', style: BADGE_STYLE }, body)
-  badge.childNodes.push({ nodeName: '#text', value: 'AI-generated demo from App Generator', parentNode: badge })
+  badge.childNodes.push({ nodeName: '#text', value: database ? 'AI-generated demo from App Generator. Anything entered here is public.' : 'AI-generated demo from App Generator', parentNode: badge })
   body.childNodes.push(badge)
   const html = serialize(doc)
   return html.startsWith('<!DOCTYPE') ? html : `<!DOCTYPE html>${html}`
@@ -199,7 +227,8 @@ const checkCss = (file: string, source: string, known: Set<string>, problems: st
   }
 }
 
-const checkScript = (file: string, source: string, problems: string[]) => {
+const checkScript = (file: string, source: string, opts: ValidateOptions, problems: string[]) => {
+  if (opts.database && HTML_SINKS.test(source)) problems.push(`${file}: innerHTML, outerHTML, insertAdjacentHTML and document.write are not allowed in an app with a database, because its rows are written by strangers. Build elements with createElement and set their text with textContent`)
   for (const match of source.matchAll(/(?:https?:|wss?:)\/\/[^\s'"`)<>]+/gi))
     if (!ALLOWED_ABSOLUTE.test(match[0])) {
       problems.push(`${file}: external URLs are not allowed in scripts`)
@@ -244,7 +273,7 @@ export const validateWorkspace = async (root: string, opts: ValidateOptions) => 
     let result = text
     if (ext === 'html') result = checkHtml(path, text, known, opts, problems) ?? text
     if (ext === 'css') checkCss(path, text, known, problems)
-    if (ext === 'js') checkScript(path, text, problems)
+    if (ext === 'js') checkScript(path, text, opts, problems)
     if (ext === 'json')
       try {
         JSON.parse(text)

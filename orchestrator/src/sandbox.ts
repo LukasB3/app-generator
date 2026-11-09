@@ -15,6 +15,8 @@ export interface AgentRun {
   edit?: boolean
   problems?: string[]
   token: string
+  // The job's pass for the database tools, or "-".
+  gateToken: string
   deadline: number
   onFile: (path: string) => void
 }
@@ -56,8 +58,8 @@ export const runAgent = (cfg: Config, job: AgentRun) =>
     }, Math.max(0, job.deadline - Date.now()))
 
     child.stdin.on('error', () => {})
-    // First line is the job token for the launcher, the rest is the agent's prompt.
-    child.stdin.end(`${job.token}\n${framePrompt(job.request, job)}`)
+    // The first two lines are tokens for the launcher, the rest is the agent's prompt.
+    child.stdin.end(`${job.token}\n${job.gateToken}\n${framePrompt(job.request, job)}`)
     child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-2000)))
 
     createInterface({ input: child.stdout }).on('line', (line) => {
