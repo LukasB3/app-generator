@@ -9,8 +9,9 @@ import { GATE_TOKEN_PATTERN, TOKEN_PATTERN } from './token.js'
 
 export const LIMITS = { files: 30, depth: 3, fileBytes: 300_000, totalBytes: 1_500_000 }
 
-// A page may send requests nowhere, with one exception: a page of an app with
-// tables may reach the Data API of the database, and only that path.
+// A page may send requests nowhere, with two exceptions, each for a page that
+// loads the library for it: the Data API of the database for an app with
+// tables, and this server's live data routes. In both cases only that path.
 const policy = (connect = "'none'") =>
   [
     "default-src 'none'",
@@ -25,6 +26,7 @@ const policy = (connect = "'none'") =>
   ].join('; ')
 export const CSP = policy()
 const DB_LIB = 'lib/db.js'
+const DATA_LIB = 'lib/data.js'
 // Rows in a table come from strangers. Written into a page as HTML, their
 // markup would become part of it for every later visitor. Scripts in it stay
 // blocked, but a fake form or a redirect would not. This catches the honest
@@ -59,6 +61,8 @@ export interface ValidateOptions {
   extraSecrets?: string[]
   // Set when the app has tables: where its pages find them.
   database?: Database
+  // The address of the live data routes, if this server offers them.
+  liveData?: string
 }
 
 const safeName = (path: string) => (path.split('/').every((s) => SEGMENT.test(s)) ? path : '(unnamed file)')
@@ -153,6 +157,7 @@ const resolved = (file: string, ref: string) => {
 const checkHtml = (file: string, source: string, known: Set<string>, opts: ValidateOptions, problems: string[]) => {
   const doc = parse(source)
   let usesDatabase = false
+  let usesLiveData = false
   // Nothing the agent wrote may precede our CSP tag except the doctype and <html>.
   doc.childNodes = doc.childNodes.filter((n) => n.nodeName !== '#comment')
   const visit = (node: T.ParentNode) => {
@@ -168,6 +173,7 @@ const checkHtml = (file: string, source: string, known: Set<string>, opts: Valid
         if (attr(child, 'src') === undefined) problems.push(`${file}: inline <script> is not allowed, move the code into a .js file`)
         else if (!/\.js([?#]|$)/.test(attr(child, 'src')!.trim())) problems.push(`${file}: <script src> must load a .js file`)
         else if (resolved(file, attr(child, 'src')!) === DB_LIB) usesDatabase = true
+        else if (resolved(file, attr(child, 'src')!) === DATA_LIB) usesLiveData = true
       }
       if (tag === 'input' && attr(child, 'type')?.toLowerCase() === 'password') problems.push(`${file}: password fields are not allowed`)
       if (/\b(cc-|current-password|new-password|one-time-code)/i.test(attr(child, 'autocomplete') ?? '')) problems.push(`${file}: fields asking for credentials or card data are not allowed`)
@@ -194,16 +200,22 @@ const checkHtml = (file: string, source: string, known: Set<string>, opts: Valid
   const body = findElement(doc, 'body')
   if (!head || !body) return void problems.push(`${file}: not a complete HTML document`)
   if (usesDatabase && !opts.database) problems.push(`${file}: loads ${DB_LIB}, but the app has no table. Ask for one with the create_table tool. If you have no such tool, the database is not available: keep the data in the browser and do not load ${DB_LIB}`)
-  // Only a page that loads the database library is told where the tables are and may reach them.
+  if (usesLiveData && !opts.liveData) problems.push(`${file}: loads ${DATA_LIB}, but live data is not available here. Build the app without it and do not load ${DATA_LIB}`)
+  // Only a page that loads one of the two libraries is told where to ask, and may ask there.
   const database = usesDatabase ? opts.database : undefined
+  const liveData = usesLiveData ? opts.liveData : undefined
+  const reachable = [database && `${database.url}/rest/v1/`, liveData].filter(Boolean)
   head.childNodes.unshift(
-    element('meta', { 'http-equiv': 'Content-Security-Policy', content: database ? policy(`${database.url}/rest/v1/`) : CSP }, head),
+    element('meta', { 'http-equiv': 'Content-Security-Policy', content: reachable.length ? policy(reachable.join(' ')) : CSP }, head),
     element('meta', { name: 'app-generator-job', content: opts.jobId }, head),
     element('meta', { name: 'referrer', content: 'no-referrer' }, head),
     ...(database ? [element('meta', { name: 'app-generator-db', content: JSON.stringify(database) }, head)] : []),
+    ...(liveData ? [element('meta', { name: 'app-generator-data', content: liveData }, head)] : []),
   )
   const badge = element('a', { href: opts.badgeUrl, rel: 'noopener', style: BADGE_STYLE }, body)
-  badge.childNodes.push({ nodeName: '#text', value: database ? 'AI-generated demo from App Generator. Anything entered here is public.' : 'AI-generated demo from App Generator', parentNode: badge })
+  // The notice for an app with tables, and the credit the sources of live data ask for.
+  const label = ['AI-generated demo from App Generator', ...(database ? ['Anything entered here is public'] : []), ...(liveData ? ['Live data: Open-Meteo.com, ECB via Frankfurter'] : [])]
+  badge.childNodes.push({ nodeName: '#text', value: label.length > 1 ? `${label.join('. ')}.` : label[0]!, parentNode: badge })
   body.childNodes.push(badge)
   const html = serialize(doc)
   return html.startsWith('<!DOCTYPE') ? html : `<!DOCTYPE html>${html}`

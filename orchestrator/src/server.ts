@@ -6,6 +6,7 @@ import type { OutgoingHttpHeaders } from 'node:http'
 import { z } from 'zod'
 import { AuthError, type Auth } from './auth.js'
 import type { Config } from './config.js'
+import { DataError, type Data } from './data.js'
 import type { PromptScreen } from './screen.js'
 import type { Job, JobEvent, Store, Who } from './store.js'
 import type { CaptchaCheck } from './turnstile.js'
@@ -30,6 +31,9 @@ export interface ServerDeps {
   captcha: CaptchaCheck
   screen: PromptScreen
   auth: Auth
+  data: Data
+  // Where the request log goes, if not to standard output.
+  logTo?: { write(line: string): void }
 }
 
 const SCREENED_OUT = {
@@ -37,15 +41,22 @@ const SCREENED_OUT = {
   abusive: 'This request is against the rules of this demo: no hateful, sexual or unlawful content. Please describe a different app.',
 }
 
-export const buildServer = async ({ cfg, store, worker, captcha, screen, auth }: ServerDeps) => {
+export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, data, logTo }: ServerDeps) => {
   // Caddy on the same host is the only client, so its forwarded address is trusted.
   // Request logs carry no client address: visitors are only ever stored as keyed hashes.
+  // They carry no query either: on the live data routes it holds a place or a position.
   const app = Fastify({
     trustProxy: '127.0.0.1',
     bodyLimit: 16_384,
-    logger: { level: 'info', serializers: { req: (req) => ({ method: req.method, url: req.url }) } },
+    logger: { level: 'info', stream: logTo, serializers: { req: (req) => ({ method: req.method, url: req.url.split('?')[0] }) } },
   })
-  await app.register(cors, { origin: cfg.WEB_ORIGIN, methods: ['GET', 'POST'], allowedHeaders: ['content-type', 'authorization'] })
+  // The website may call everything but the live data routes. Published apps,
+  // which live on another origin, may call the live data routes and nothing else.
+  const appsOrigin = new URL(cfg.APPS_BASE_URL).origin
+  await app.register(cors, {
+    delegator: (req, callback) =>
+      callback(null, req.url?.startsWith('/api/data/') ? { origin: appsOrigin, methods: ['GET'] } : { origin: cfg.WEB_ORIGIN, methods: ['GET', 'POST'], allowedHeaders: ['content-type', 'authorization'] }),
+  })
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' })
 
   const submission = z.object({
@@ -120,6 +131,17 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth }:
   }
 
   app.get('/api/health', () => ({ ok: true }))
+
+  // Live data for published apps (data.ts). The answer may be kept by the browser as long as it is good for.
+  app.get<{ Params: { source: string } }>('/api/data/:source', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+    try {
+      const { body, maxAgeS } = await data.get(req.params.source, req.query, hashIp(req.ip))
+      return reply.header('cache-control', `public, max-age=${maxAgeS}`).send(body)
+    } catch (error) {
+      if (error instanceof DataError) return refuse(reply, error.status, error.message)
+      throw error
+    }
+  })
 
   app.post('/api/jobs', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const parsed = submission.safeParse(req.body)

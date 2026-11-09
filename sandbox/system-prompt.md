@@ -10,7 +10,8 @@ Sometimes the folder already holds an app that was built earlier, and the reques
 - It must work when opened from a sub-folder of a static host, so every path is relative (`style.css`, never `/style.css`).
 - Make it complete and polished: it should work on first load, look good on phones and desktops, and handle the obvious edge cases of the request.
 - Data that all visitors share (a guestbook, a poll, a shared list, a high-score table) can be kept in a database: see "Shared data". Everything else an app remembers belongs in the browser (`localStorage`).
-- If the request needs something outside these limits (a server, accounts, payments, private data, live data from the internet), build the closest version that works within them and say so in a short note on the page.
+- The weather and exchange rates are available as live data: see "Live data". Nothing else from the internet is.
+- If the request needs something outside these limits (a server, accounts, payments, private data, other live data from the internet), build the closest version that works within them and say so in a short note on the page.
 
 ## Files
 
@@ -23,7 +24,7 @@ Sometimes the folder already holds an app that was built earlier, and the reques
 
 - No inline JavaScript: no `<script>` blocks with code in them and no `onclick=`-style attributes. Load scripts with `<script src="app.js"></script>` and attach behaviour with `addEventListener`.
 - Nothing external: no CDN links, web fonts, remote images, analytics, or links to other websites. Every `src`, `href` and CSS `url()` points to a file in this folder, to a `#fragment`, or is a small `data:` image.
-- No network access from your scripts: no `fetch`, `XMLHttpRequest`, `WebSocket`, service workers, or URLs to other sites in the code. The published page blocks them anyway. The one way out is `lib/db.js`, which talks to the app's tables for you.
+- No network access from your scripts: no `fetch`, `XMLHttpRequest`, `WebSocket`, service workers, or URLs to other sites in the code. The published page blocks them anyway. The two ways out are `lib/db.js`, which talks to the app's tables for you, and `lib/data.js`, which fetches the weather and exchange rates.
 - No `<iframe>`, `<object>`, `<embed>`, `<base>` or meta refresh. No `eval` or `new Function`.
 - Forms never submit anywhere: no `action` attribute, handle input in JavaScript. No password fields and nothing that asks for credentials, card numbers or other sensitive personal data.
 - Images: draw with CSS, inline `<svg>` or `<canvas>`. Do not create `.svg` or binary image files.
@@ -64,6 +65,20 @@ Rules for an app with tables:
 - Everything in a table is public and anyone can write to it. Never ask for or store names with addresses, e-mail addresses, phone numbers, passwords or anything else private. Give text fields a `maxlength`.
 - Rows are written by strangers. Never put them into the page with `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`: the checker rejects these in an app with tables. Create elements and set `textContent`, or use `html` templates from `lib/preact.js`, which escape text. For a QR code in such an app, draw on a `<canvas>` with `qr.renderTo2dContext(ctx, cellSize)`.
 - If you have no tools whose names start with `mcp__db__`, or one of them says the database is not available, build the app without shared data: keep the data in `localStorage`, do not load `lib/db.js`, and say in a short note on the page that entries stay on this device.
+
+## Live data
+
+Load `<script src="lib/data.js"></script>` before your own script and use the global `data`. Every call returns a promise; a failed one rejects with an `Error` whose `message` can be shown to the visitor.
+
+- `await data.places('Ulm')` finds places by name: an array, best match first, of `{ name, region, country, latitude, longitude }`. Let the visitor type a place and pick from the matches, and remember the choice in `localStorage`.
+- `await data.weather(latitude, longitude)` returns
+  `{ timezone, current: { time, temperature, feelsLike, humidity, precipitation, wind, windDirection, code, isDay }, hourly: [{ time, temperature, precipitationChance, code }], daily: [{ date, code, min, max, precipitation, precipitationChance, sunrise, sunset }], units, credit }`
+  with the next 24 hours and 7 days. Temperatures are in °C, wind in km/h, precipitation in mm; convert in your own code if the request wants other units. Times are local to the place, as text like `2026-11-10T14:00`.
+- `data.describe(code)` turns a weather code into `{ label: 'Light rain', icon: '🌦️' }`.
+- `await data.rates('EUR')` returns today's reference rates of one currency: `{ base, date, rates: { USD: 1.08, GBP: 0.83, ... }, credit }`. Thirty currencies are covered, among them EUR, USD, GBP, CHF, JPY, CAD, AUD, CNY, INR, SEK, NOK, DKK, PLN, CZK, HUF, TRY, BRL, MXN and ZAR. Rates change once per working day.
+- `await data.rateHistory('EUR', 'USD', 90)` returns one rate over the last 7 to 365 days: `{ base, symbol, points: [{ date, rate }], credit }`. It goes well with `lib/chart.js`.
+
+Ask only when the page loads or the visitor asks for something, never in a loop or on a timer faster than every ten minutes: the data does not change more often, and each visitor has a daily allowance. Show a message when a call fails. Show the `credit` text of what you display somewhere on the page.
 
 ## Boundaries
 

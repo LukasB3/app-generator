@@ -47,6 +47,7 @@ flowchart LR
 | Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online, and that its owner can change it. For everyone else the change route answers as if the app did not exist. |
 | Agent goes for the database | It never touches it. Its three tools reach a gateway that accepts "create a table" and "add a column", checks names, types and limits, and writes the wish down. The orchestrator has the wishes applied in one transaction after the checker has passed the app, so a rejected app leaves nothing behind. The gateway builds every statement itself and logs in as a role with rights on one schema and no way to the accounts, which it checks about itself before it does any work. That role's password is made on the server and reaches the database only as a SCRAM verifier. |
 | Data in an app's tables | It is public, and the app says so on the page: every visitor can read all rows and add rows, and in tables made for it change and delete them. Row level security and explicit grants fix that per table when it is created; logged-in accounts get nothing extra. A trigger caps a table at 500 rows and a row at 2 kB, an app gets three tables, and tables are dropped with their app. A page can therefore store what a visitor types where others can read it. Apps must not ask for anything private, and the checker rejects password and card fields as before. |
+| Live data | An app can show the weather and exchange rates. It asks this API, which knows four fixed questions with typed parameters, builds the address of the source itself, follows no redirect, and writes its own answer from the fields it expects. Only a page that loads the library for it may send requests there, and the API answers published apps on these routes only. Requests are limited per address and per day. |
 | Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
 The full reasoning, including the trade-offs that remain, is in [docs/threat-model.md](docs/threat-model.md).
@@ -96,6 +97,8 @@ sudo ./infra/deploy.sh
 
 The website is a Vercel project with `web/` as its root directory and `VITE_API_BASE` and `VITE_TURNSTILE_SITEKEY` set.
 
+Live data is optional too. Set `API_ORIGIN` in `orchestrator.env` to the address the API is reached at from outside (a fresh `provision.sh` does). Without it apps are built without live data.
+
 The database gateway is optional as well: without it apps keep their data in the browser. It needs `infra/supabase-setup.sql` run once in the Supabase project, and the project's pooler address and role name in `infra/compose.yml`. The first deploy makes the role's password; `infra/gate-role.mjs` on the server then prints the statement that gives it to the database.
 
 Accounts are optional. They need a Supabase project with e-mail login, its own SMTP provider and Turnstile as captcha. Set `SUPABASE_URL` and `SUPABASE_KEY` (the publishable key) in `orchestrator.env`, and `VITE_SUPABASE_URL`, `VITE_SUPABASE_KEY` and `VITE_TURNSTILE_LOGIN_SITEKEY` for the website, and add the project's `/auth/v1/` address to `connect-src` in `web/vercel.json`. Without these settings nobody can log in and everything else works the same.
@@ -114,8 +117,9 @@ Accounts are optional. They need a Supabase project with e-mail login, its own S
 | App size | 30 files, 300 kB per file, 1.5 MB in total |
 | App lifetime | 1 day, or 10 days when requested from an account, then removed from the apps repository |
 | App data | 3 tables per app with 12 columns each, 500 rows per table, 2 kB per row, 150 tables overall; dropped with the app |
+| Live data | 60 requests per address per minute; 300 lookups per visitor and 5,000 overall per day that are not answered from memory |
 | Job records | 30 days |
 
 Dollar budgets count what finished jobs have cost, so jobs that are still waiting or running can take a total past its budget, each by at most the cap for one job.
 
-Generated apps can load four bundled libraries and nothing else from outside their own files: a QR code generator, Chart.js, Preact with htm, and the project's own client for an app's tables. They are listed in [sandbox/libs/README.md](sandbox/libs/README.md).
+Generated apps can load five bundled libraries and nothing else from outside their own files: a QR code generator, Chart.js, Preact with htm, and the project's own clients for an app's tables and for live data. They are listed in [sandbox/libs/README.md](sandbox/libs/README.md).

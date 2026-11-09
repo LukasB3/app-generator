@@ -10,6 +10,6 @@ The only third-party code a generated app can load. The orchestrator copies this
 
 `preact.js` has one line added at the top, the licence notice the upstream bundle lacks; the checksum is of the file without that line. The other two are byte for byte what npm delivers.
 
-`db.js` is not from npm. It is this project's own: the client for an app's tables in the shared database, described in `../../docs/threat-model.md`.
+`db.js` and `data.js` are not from npm. They are this project's own: the client for an app's tables in the shared database, and the client for the live data routes of the API. Both are described in `../../docs/threat-model.md`.
 
 To add a library: one classic script (no modules, no imports), small because every app that uses it carries a copy, pinned to a release that has been out for a while, read as described above, listed here and documented in `../system-prompt.md`.

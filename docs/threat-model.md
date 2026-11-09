@@ -32,6 +32,7 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 7. **Orchestrator → database gateway → database.** The gateway holds the one database login. After the checker has passed an app, the orchestrator hands the gateway the changes it wrote down for that job, and the gateway turns them into statements. Nobody sends it SQL.
 8. **Published app → visitor.** The app runs in the visitor's browser under a policy the agent cannot change.
 9. **Published app → database.** A page of an app with tables talks to the database's Data API from the visitor's browser, with a public key and the rights of an anonymous visitor.
+10. **Published app → this API → two public sources.** A page of an app with live data asks this API for the weather or for exchange rates. The API asks the source and writes its own answer.
 
 ## Threats and controls
 
@@ -67,7 +68,7 @@ HTML that passes is parsed and written out again with three additions at the ver
 
 The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'none'` and `script-src 'self'`, a page cannot send requests anywhere or load code from elsewhere, whatever its scripts try. The checks before it exist so that a rejected app fails loudly with a reason instead of being published broken.
 
-One kind of page gets a wider policy: a page that loads the database library, in an app that has tables. Its `connect-src` names the Data API path of the database and nothing else. What that opens up is described under "Data in an app's tables".
+Two kinds of page get a wider policy, each by one path. A page that loads the database library, in an app that has tables, may reach the Data API of the database. A page that loads the live data library may reach the live data routes of this API. What each opens up is described under "Data in an app's tables" and "Live data".
 
 ### The attacker targets the pipeline itself
 
@@ -130,6 +131,19 @@ What remains, and is the price of apps that share data:
 - **A page can keep what a visitor types.** Without tables, a page had nowhere to send it. A page with tables can store it where its author, and everyone else, can read it. The notice says so, but the agent's own styles could cover it. What stands against abuse is that the data is public rather than private to an attacker, that the checker still rejects password and card fields, that apps live for one or ten days, and that removing an app removes its tables.
 - **Anyone can write to any app's table.** The public key is in every such page, and the table names are in the public apps repository. Someone can fill a guestbook with rubbish up to its cap, or wipe a shared list. Apps are demos; nothing in them is worth more than that.
 - **Reading costs the project, not the reader.** Someone who reads tables in a loop can use up the free plan's transfer quota. Logins live in the same project and would stop with it. Builds without an account never depend on it.
+
+### Live data
+
+A published app can show the weather and exchange rates. It never reaches the sources. It asks this API, which answers four fixed questions: the weather at a position, places by name, today's rates of a currency, and one rate over time.
+
+- **Nothing is passed through.** Each question has typed parameters: a position as two bounded decimal numbers, a currency from a list of thirty, a number of days, the name of a place. The API builds the upstream address itself, for two fixed hosts, follows no redirect, waits five seconds at most and reads 200 kB at most.
+- **Answers are rebuilt, not forwarded.** The API takes the fields it expects from an answer, checks each for its type, and writes its own response. Whatever else a source might send, by mistake or after being taken over, stays behind.
+- **Only a page that loads the live data library is let through, and only to these routes.** The checker writes their address into a meta tag; the agent's code holds none. The rest of this API is out of such a page's reach twice over: the page's policy does not allow the request, and the API answers the apps' origin on these routes only.
+- **The routes are public, so they are limited.** An address gets 60 requests a minute. Answers are kept in memory for as long as they are good (the weather ten minutes, rates an hour, a place a day). What is not in memory counts against a daily allowance, per visitor and overall, so that one caller cannot use up what the sources give away.
+- **Little of the visitor goes anywhere.** A position is rounded to about a kilometre before it leaves, the visitor's address never leaves, and the request log holds neither a position nor a place.
+- **The sources are named on the page.** The checker adds the credit they ask for to the badge of every page that can ask for live data.
+
+What remains: the name of a place is free text. A page that is out to do it could send what a visitor typed, sixty characters at a time, as a place to look up. It would reach this server's memory and the weather service, and nobody who could read it back. And whoever uses up the daily allowance from many addresses switches live data off for everyone until the next day; apps then show a message.
 
 ## Known trade-offs
 

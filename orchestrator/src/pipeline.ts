@@ -81,6 +81,7 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
           badgeUrl: cfg.WEB_ORIGIN,
           extraSecrets: [token, gate.enabled ? gateToken : '', cfg.PROXY_SIGNING_SECRET, cfg.TURNSTILE_SECRET, cfg.IP_HASH_SECRET, cfg.GATE_SIGNING_SECRET ?? ''],
           database: hasTables ? gate.database(job.appId) : undefined,
+          liveData: cfg.API_ORIGIN && `${cfg.API_ORIGIN}/api/data/`,
         })
         return { ...checked, changes }
       }

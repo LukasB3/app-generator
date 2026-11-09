@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AuthError, type Auth } from '../src/auth.js'
 import { loadConfig, type Config } from '../src/config.js'
+import { DataError, type Data } from '../src/data.js'
 import type { Pipeline } from '../src/pipeline.js'
 import { framePrompt } from '../src/sandbox.js'
 import type { PromptScreen } from '../src/screen.js'
@@ -22,6 +23,17 @@ let store: Store
 let app: Awaited<ReturnType<typeof buildServer>>
 let release: (() => void)[] = []
 let captchaChecks = 0
+// Stands in for the live data module: keeps what it was asked and answers as told.
+let dataAsked: [string, unknown, string][] = []
+let dataFailure: Error | undefined
+let logged: string[] = []
+const data: Data = {
+  get: async (name, query, visitor) => {
+    dataAsked.push([name, query, visitor])
+    if (dataFailure) throw dataFailure
+    return { body: { asked: name }, maxAgeS: 600 }
+  },
+}
 
 // Logins in these tests are "Bearer user-<name>"; anything else does not verify.
 const auth: Auth = async (authorization) => {
@@ -38,7 +50,10 @@ const setup = async (pipeline: Pipeline, overrides: Partial<Config> = {}, screen
     captchaChecks++
     return token === 'good'
   }
-  app = await buildServer({ cfg: { ...cfg, ...overrides }, store, worker, captcha, screen, auth })
+  dataAsked = []
+  dataFailure = undefined
+  logged = []
+  app = await buildServer({ cfg: { ...cfg, ...overrides }, store, worker, captcha, screen, auth, data, logTo: { write: (line) => void logged.push(line) } })
   app.log.level = 'silent'
 }
 
@@ -414,6 +429,63 @@ describe('job results', () => {
     const from = async (origin: string) => (await app.inject({ url: '/api/health', headers: { origin } })).headers['access-control-allow-origin']
     expect(await from('https://app-generator.example')).toBe('https://app-generator.example')
     expect(await from('https://evil.example')).not.toBe('https://evil.example')
+  })
+})
+
+describe('live data routes', () => {
+  const APPS = 'https://lukasb3.github.io'
+  const ask = (url: string, headers: Record<string, string> = {}, ip = '203.0.113.9') => app.inject({ url, remoteAddress: '127.0.0.1', headers: { 'x-forwarded-for': ip, ...headers } })
+
+  it('answer through the data module, say how long the answer is good for, and count a visitor by a hash of the address', async () => {
+    await setup(gated)
+    const res = await ask('/api/data/weather?lat=48.4&lon=9.99')
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ asked: 'weather' })
+    expect(res.headers['cache-control']).toBe('public, max-age=600')
+    await ask('/api/data/weather?lat=1&lon=2', {}, '203.0.113.10')
+    const [[name, query, visitor], [, , other]] = dataAsked as [[string, unknown, string], [string, unknown, string]]
+    expect([name, query]).toEqual(['weather', { lat: '48.4', lon: '9.99' }])
+    expect(visitor).toMatch(/^[0-9a-f]{32}$/)
+    expect(other).not.toBe(visitor)
+  })
+
+  it('pass a refusal on with its status and its sentence', async () => {
+    await setup(gated)
+    dataFailure = new DataError(400, 'These are not valid parameters for this live data.')
+    const res = await ask('/api/data/rates?base=XXX')
+    expect([res.statusCode, res.json()]).toEqual([400, { error: 'These are not valid parameters for this live data.' }])
+    expect((await app.inject({ method: 'POST', url: '/api/data/rates' })).statusCode).toBe(404)
+  })
+
+  it('are the only routes a published app may call from a browser, and no other site may call them', async () => {
+    await setup(gated)
+    const allowed = async (url: string, origin: string) => (await ask(url, { origin })).headers['access-control-allow-origin'] === origin
+    expect(await allowed('/api/data/rates?base=EUR', APPS)).toBe(true)
+    expect(await allowed('/api/data/rates?base=EUR', 'https://evil.example')).toBe(false)
+    expect(await allowed('/api/data/rates?base=EUR', 'https://app-generator.example')).toBe(false)
+    for (const url of ['/api/health', '/api/apps', `/api/jobs/${'a'.repeat(20)}`, '/api/database']) expect(await allowed(url, APPS)).toBe(false)
+    expect(await allowed('/api/health', 'https://app-generator.example')).toBe(true)
+    // Nor may a published app send a job: the question a browser asks first is turned down.
+    const preflight = await app.inject({ method: 'OPTIONS', url: '/api/jobs', headers: { origin: APPS, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' } })
+    expect(preflight.headers['access-control-allow-origin']).not.toBe(APPS)
+  })
+
+  it('give one address 60 requests a minute', async () => {
+    await setup(gated)
+    for (let n = 0; n < 60; n++) expect((await ask('/api/data/rates?base=EUR')).statusCode).toBe(200)
+    expect((await ask('/api/data/rates?base=EUR')).statusCode).toBe(429)
+    expect((await ask('/api/data/rates?base=EUR', {}, '203.0.113.77')).statusCode).toBe(200)
+  })
+
+  it('leave no place, position or address in the request log', async () => {
+    await setup(gated)
+    app.log.level = 'info'
+    await ask('/api/data/places?name=Musterdorf')
+    await ask('/api/data/weather?lat=48.4&lon=9.99')
+    const lines = logged.join('')
+    expect(lines).toContain('"url":"/api/data/places"')
+    expect(lines).toContain('"url":"/api/data/weather"')
+    expect(lines).not.toMatch(/Musterdorf|48\.4|9\.99|203\.0\.113/)
   })
 })
 
