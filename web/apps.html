@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Log in to App Generator with your e-mail address to keep your apps online for ten days and see them in one place." />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23211a72'/%3E%3Cpath d='M6 10h20v4.5a1.5 1.5 0 0 0 0 3V22H6v-4.5a1.5 1.5 0 0 0 0-3z' fill='%23ffd23f'/%3E%3Cpath d='M20 12v8' stroke='%23211a72' stroke-width='1.5' stroke-dasharray='1.5 1.5'/%3E%3C/svg%3E" />
+    <title>My apps – App Generator</title>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="brand" href="./">App Generator</a>
+    </header>
+
+    <main class="account">
+      <h1>My apps</h1>
+
+      <section id="login" hidden>
+        <p class="lede">Log in with your e-mail address and the apps you build stay online for ten days instead of one. You find them all here.</p>
+
+        <form id="ask" class="entry" novalidate>
+          <label for="email">E-mail address</label>
+          <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required />
+          <div id="captcha"></div>
+          <button id="send" class="primary" type="submit" disabled>Send me a login mail</button>
+          <p class="consent">There is no password. The mail holds a link and a code, and either one logs you in. Your address is used for logging in and nothing else, as described in the <a href="legal#privacy">privacy policy</a>.</p>
+        </form>
+
+        <form id="confirm" class="entry" novalidate hidden>
+          <p id="sent"></p>
+          <label for="code">Code from the mail</label>
+          <input id="code" name="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" required />
+          <button id="enter" class="primary" type="submit" disabled>Log in</button>
+          <button id="again" class="quiet" type="button">Use a different address</button>
+        </form>
+      </section>
+
+      <section id="mine" hidden>
+        <p class="lede">Logged in as <strong id="who"></strong>. Apps you build while logged in stay online for ten days. <button id="logout" class="quiet" type="button">Log out</button></p>
+        <ul id="apps" class="apps"></ul>
+        <p id="none" hidden>No apps yet. <a href="./">Build one</a> and it shows up here.</p>
+      </section>
+
+      <p id="notice" class="notice" role="alert" hidden></p>
+    </main>
+
+    <footer>
+      <p><a href="./">Back to the app generator</a></p>
+    </footer>
+
+    <script type="module" src="/src/apps.ts"></script>
+  </body>
+</html>

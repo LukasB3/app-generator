@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { AuthError, type Auth } from '../src/auth.js'
 import { loadConfig, type Config } from '../src/config.js'
 import type { Pipeline } from '../src/pipeline.js'
 import { framePrompt } from '../src/sandbox.js'
@@ -20,11 +21,24 @@ const cfg: Config = loadConfig({
 let store: Store
 let app: Awaited<ReturnType<typeof buildServer>>
 let release: (() => void)[] = []
+let captchaChecks = 0
+
+// Logins in these tests are "Bearer user-<name>"; anything else does not verify.
+const auth: Auth = async (authorization) => {
+  if (authorization === undefined) return null
+  if (!authorization.startsWith('Bearer user-')) throw new AuthError()
+  return authorization.slice('Bearer '.length)
+}
 
 const setup = async (pipeline: Pipeline, overrides: Partial<Config> = {}, screen: PromptScreen = async () => 'ok') => {
   store = new Store(':memory:')
+  captchaChecks = 0
   const worker = new Worker(store, pipeline, () => {})
-  app = await buildServer({ cfg: { ...cfg, ...overrides }, store, worker, captcha: async (token) => token === 'good', screen })
+  const captcha = async (token: string) => {
+    captchaChecks++
+    return token === 'good'
+  }
+  app = await buildServer({ cfg: { ...cfg, ...overrides }, store, worker, captcha, screen, auth })
   app.log.level = 'silent'
 }
 
@@ -36,8 +50,9 @@ const gated: Pipeline = (_job, report) =>
     release.push(() => resolve('https://apps.example/apps/x/'))
   })
 
-const submit = (prompt = 'make me tic tac toe', ip = '203.0.113.1', captchaToken = 'good') =>
-  app.inject({ method: 'POST', url: '/api/jobs', remoteAddress: '127.0.0.1', headers: { 'x-forwarded-for': ip }, payload: { prompt, captchaToken } })
+const submit = (prompt = 'make me tic tac toe', ip = '203.0.113.1', captchaToken = 'good', login?: string) =>
+  app.inject({ method: 'POST', url: '/api/jobs', remoteAddress: '127.0.0.1', headers: { 'x-forwarded-for': ip, ...(login && { authorization: `Bearer ${login}` }) }, payload: { prompt, captchaToken } })
+const myApps = (login?: string) => app.inject({ url: '/api/apps', headers: login ? { authorization: `Bearer ${login}` } : {} })
 
 beforeEach(() => {
   release = []
@@ -114,7 +129,7 @@ describe('POST /api/jobs', () => {
     await app.close()
     await setup(gated)
     const day = 24 * 3_600_000
-    store.createJob('tendaysago', 'an earlier request', 'h', Date.now() + day, Date.now() - 10 * day)
+    store.createJob({ id: 'tendaysago', prompt: 'an earlier request', ipHash: 'h', expiresAt: Date.now() + day, now: Date.now() - 10 * day })
     store.setCost('tendaysago', cfg.MONTHLY_BUDGET_USD * 1e6 - 1)
     expect((await submit()).statusCode).toBe(202)
     store.setCost('tendaysago', cfg.MONTHLY_BUDGET_USD * 1e6)
@@ -179,6 +194,68 @@ describe('POST /api/jobs', () => {
   })
 })
 
+describe('accounts', () => {
+  it('keeps the app of a logged-in visitor for longer and lists it for that account only', async () => {
+    await setup(gated)
+    const mine = (await submit('my own app', '203.0.113.1', 'good', 'user-anna')).json()
+    const anonymous = (await submit('nobody in particular', '203.0.113.2')).json()
+    expect(Math.abs(mine.expiresAt - mine.now - cfg.USER_APP_TTL_H * 3_600_000)).toBeLessThan(5000)
+    expect(Math.abs(anonymous.expiresAt - anonymous.now - cfg.APP_TTL_H * 3_600_000)).toBeLessThan(5000)
+    expect(store.getApp(mine.id)!.ownerId).toBe('user-anna')
+    expect(store.getApp(anonymous.id)!.ownerId).toBeNull()
+
+    const listed = (await myApps('user-anna')).json()
+    expect(listed.apps).toEqual([{ id: mine.id, prompt: 'my own app', status: 'coding', url: null, createdAt: expect.any(Number), expiresAt: mine.expiresAt }])
+    expect(Math.abs(Date.now() - listed.now)).toBeLessThan(5000)
+    expect((await myApps('user-ben')).json().apps).toEqual([])
+  })
+
+  it('shows the list to nobody without a valid login', async () => {
+    await setup(gated)
+    await submit('my own app', '203.0.113.1', 'good', 'user-anna')
+    for (const login of [undefined, 'something-else']) {
+      const res = await myApps(login)
+      expect(res.statusCode).toBe(401)
+      expect(res.json().apps).toBeUndefined()
+    }
+  })
+
+  it('refuses a login that does not verify instead of building anonymously, and leaves the captcha unused', async () => {
+    await setup(gated)
+    const res = await submit('my own app', '203.0.113.1', 'good', 'something-else')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().error).toMatch(/log in again/)
+    expect(store.countSince(0)).toBe(0)
+    expect(captchaChecks).toBe(0)
+  })
+
+  it('counts a logged-in visitor by account as well as by address', async () => {
+    await setup(gated, { QUEUE_MAX: 10 })
+    expect((await submit('first app', '203.0.113.1', 'good', 'user-anna')).statusCode).toBe(202)
+    expect((await submit('second app', '203.0.113.2', 'good', 'user-anna')).statusCode).toBe(202)
+    expect((await submit('third app', '203.0.113.3', 'good', 'user-anna')).json().error).toMatch(/hourly limit/)
+    // The address is not held against the next person, and their own count starts at zero.
+    expect((await submit('fourth app', '203.0.113.3', 'good', 'user-ben')).statusCode).toBe(202)
+  })
+
+  it('holds what an account has spent against it wherever it logs in from', async () => {
+    await setup(gated, { QUEUE_MAX: 10 })
+    const first = (await submit('first app', '203.0.113.1', 'good', 'user-anna')).json()
+    store.setCost(first.id, cfg.VISITOR_DAILY_BUDGET_USD * 1e6)
+    expect((await submit('second app', '203.0.113.2', 'good', 'user-anna')).json().error).toMatch(/limit for today/)
+    expect((await submit('second app', '203.0.113.2', 'good', 'user-ben')).statusCode).toBe(202)
+  })
+
+  it('leaves a failed build out of the list', async () => {
+    await setup(async () => {
+      throw new Error('push failed')
+    })
+    const { id } = (await submit('my own app', '203.0.113.1', 'good', 'user-anna')).json()
+    await expect.poll(() => store.getJob(id)!.status).toBe('failed')
+    expect((await myApps('user-anna')).json().apps).toEqual([])
+  })
+})
+
 describe('job results', () => {
   it('reports a safe message when the checker rejects the app', async () => {
     await setup(async () => {
@@ -232,8 +309,8 @@ describe('job results', () => {
   it('purges old jobs with their events, and apps long after they expired', async () => {
     await setup(gated)
     const day = 24 * 3_600_000
-    store.createJob('old', 'an old request', 'h', Date.now() - 39 * day, Date.now() - 40 * day)
-    store.createJob('new', 'a new request', 'h', Date.now() + day)
+    store.createJob({ id: 'old', prompt: 'an old request', ipHash: 'h', expiresAt: Date.now() - 39 * day, now: Date.now() - 40 * day })
+    store.createJob({ id: 'new', prompt: 'a new request', ipHash: 'h', expiresAt: Date.now() + day })
     expect(store.purgeOlderThan(Date.now() - 30 * day)).toBe(1)
     expect(store.getJob('old')).toBeUndefined()
     expect(store.getApp('old')).toBeUndefined()

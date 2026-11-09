@@ -9,9 +9,23 @@ export type EventType = 'status' | 'file' | 'note'
 // An app is what gets published and expires. A job is one build of it.
 export interface App {
   id: string
+  ownerId: string | null
   createdAt: number
   expiresAt: number
 }
+
+// An app as its owner sees it in their list: with the request and state of its first build.
+export interface OwnedApp {
+  id: string
+  prompt: string
+  status: JobStatus
+  url: string | null
+  createdAt: number
+  expiresAt: number
+}
+
+// One visitor, known by address or by account.
+export type Who = { ipHash: string } | { userId: string }
 
 export interface Job {
   id: string
@@ -65,6 +79,9 @@ const MIGRATIONS = [
    INSERT INTO apps (id, createdAt, expiresAt) SELECT id, createdAt, createdAt + ${30 * DAY} FROM jobs WHERE status != 'failed';`,
   // 3: what each job cost, as the key proxy counted it, for the budgets.
   `ALTER TABLE jobs ADD COLUMN costMicroUsd INTEGER NOT NULL DEFAULT 0;`,
+  // 4: accounts. Both stay empty for visitors who are not logged in.
+  `ALTER TABLE jobs ADD COLUMN userId TEXT;
+   ALTER TABLE apps ADD COLUMN ownerId TEXT;`,
 ]
 
 export class Store {
@@ -98,10 +115,10 @@ export class Store {
     }
   }
 
-  // A new job starts a new app under the same id.
-  createJob(id: string, prompt: string, ipHash: string, expiresAt: number, now = Date.now()) {
-    this.db.prepare('INSERT INTO apps (id, createdAt, expiresAt) VALUES (?, ?, ?)').run(id, now, expiresAt)
-    this.db.prepare('INSERT INTO jobs (id, appId, prompt, ipHash, createdAt) VALUES (?, ?, ?, ?, ?)').run(id, id, prompt, ipHash, now)
+  // A new job starts a new app under the same id, owned by whoever is logged in.
+  createJob({ id, prompt, ipHash, userId = null, expiresAt, now = Date.now() }: { id: string; prompt: string; ipHash: string; userId?: string | null; expiresAt: number; now?: number }) {
+    this.db.prepare('INSERT INTO apps (id, ownerId, createdAt, expiresAt) VALUES (?, ?, ?, ?)').run(id, userId, now, expiresAt)
+    this.db.prepare('INSERT INTO jobs (id, appId, prompt, ipHash, userId, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(id, id, prompt, ipHash, userId, now)
     this.addEvent(id, 'status', 'queued', now)
   }
 
@@ -110,7 +127,14 @@ export class Store {
   }
 
   getApp(id: string) {
-    return this.db.prepare('SELECT id, createdAt, expiresAt FROM apps WHERE id = ?').get(id) as unknown as App | undefined
+    return this.db.prepare('SELECT id, ownerId, createdAt, expiresAt FROM apps WHERE id = ?').get(id) as unknown as App | undefined
+  }
+
+  // The live apps of one account, newest first.
+  appsOf(ownerId: string, now = Date.now()) {
+    return this.db
+      .prepare('SELECT a.id, j.prompt, j.status, j.url, a.createdAt, a.expiresAt FROM apps a JOIN jobs j ON j.id = a.id WHERE a.ownerId = ? AND a.expiresAt > ? ORDER BY a.createdAt DESC')
+      .all(ownerId, now) as unknown as OwnedApp[]
   }
 
   nextQueued() {
@@ -129,23 +153,27 @@ export class Store {
     return (this.db.prepare(`SELECT count(*) AS c FROM jobs WHERE status = 'queued'`).get() as { c: number }).c
   }
 
-  countSince(since: number, ipHash?: string) {
-    const row = ipHash
-      ? this.db.prepare('SELECT count(*) AS c FROM jobs WHERE createdAt >= ? AND ipHash = ?').get(since, ipHash)
-      : this.db.prepare('SELECT count(*) AS c FROM jobs WHERE createdAt >= ?').get(since)
+  // A figure over the jobs created since then: everyone's, or one visitor's.
+  private total(figure: string, since: number, who?: Who) {
+    const row = !who
+      ? this.db.prepare(`SELECT ${figure} AS c FROM jobs WHERE createdAt >= ?`).get(since)
+      : 'userId' in who
+        ? this.db.prepare(`SELECT ${figure} AS c FROM jobs WHERE createdAt >= ? AND userId = ?`).get(since, who.userId)
+        : this.db.prepare(`SELECT ${figure} AS c FROM jobs WHERE createdAt >= ? AND ipHash = ?`).get(since, who.ipHash)
     return (row as { c: number }).c
+  }
+
+  countSince(since: number, who?: Who) {
+    return this.total('count(*)', since, who)
+  }
+
+  // In micro-USD.
+  costSince(since: number, who?: Who) {
+    return this.total('coalesce(sum(costMicroUsd), 0)', since, who)
   }
 
   setCost(id: string, microUsd: number) {
     this.db.prepare('UPDATE jobs SET costMicroUsd = ? WHERE id = ?').run(Math.ceil(microUsd), id)
-  }
-
-  // Micro-USD spent by jobs created since then, by everyone or by one visitor.
-  costSince(since: number, ipHash?: string) {
-    const row = ipHash
-      ? this.db.prepare('SELECT coalesce(sum(costMicroUsd), 0) AS c FROM jobs WHERE createdAt >= ? AND ipHash = ?').get(since, ipHash)
-      : this.db.prepare('SELECT coalesce(sum(costMicroUsd), 0) AS c FROM jobs WHERE createdAt >= ?').get(since)
-    return (row as { c: number }).c
   }
 
   setStatus(id: string, status: JobStatus, result: { url?: string; error?: string } = {}) {

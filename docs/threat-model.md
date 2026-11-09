@@ -17,10 +17,11 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 | The host | | |
 | Visitors of published apps | their browsers | |
 | The budget | Anthropic workspace | |
+| Accounts: e-mail addresses and logins | Supabase project (Auth) | Supabase; nothing on this server holds a key to it |
 
 ## Trust boundaries
 
-1. **Internet → orchestrator API.** Untrusted HTTP. Input is a prompt of limited length and a captcha token, validated with a schema. Job ids in URLs must match a fixed pattern before they touch the database.
+1. **Internet → orchestrator API.** Untrusted HTTP. Input is a prompt of limited length and a captcha token, validated with a schema, and optionally a login token. Job ids in URLs must match a fixed pattern before they touch the database.
 2. **Orchestrator → launcher → sandbox.** The orchestrator cannot talk to Docker. It hands a job id, a job token and the prompt to a root-owned launcher, which starts the container with fixed settings. Exactly three things reach the container: the prompt on stdin, the token in the environment, and an empty workspace with the bundled libraries. The agent's command line is fixed in the image.
 3. **Sandbox → key proxy.** The only network path out of the sandbox. The proxy treats the container as hostile.
 4. **Sandbox → orchestrator (the workspace).** Whatever the agent wrote is hostile data. It is read by the checker and never executed on the server.
@@ -71,14 +72,23 @@ The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'n
 ### The attacker targets the budget or the service
 
 - Turnstile in front of job creation, verified on the server.
-- Three jobs per visitor per hour (IPv6 visitors are counted per /64), ten per hour and thirty per day overall, a queue of ten.
+- Three jobs per visitor per hour (IPv6 visitors are counted per /64, logged-in visitors by account as well), ten per hour and thirty per day overall, a queue of ten.
 - One job at a time, each with a hard timeout and a budget in tokens and dollars.
 - The orchestrator stores what each job cost, as the proxy counted it, and turns new jobs away once a visitor's day, the day or the last 30 days have used their budget. The cost of a job is known when it ends, so jobs already waiting can overshoot a budget, each by at most the cap for one job.
 - A prompt screen in front of the queue. After the captcha and the limits, the orchestrator asks a small model (Claude Haiku 5.5) whether the text is a request for an app, gibberish, or abusive, and turns the last two away with a fixed message. The call goes through the key proxy with a 30-second job token, so the orchestrator still never holds the API key and the proxy's vetting and logging apply.
 - The screen is not a security control and nothing depends on it. The visitor's text is passed as data, the answer is constrained to three fixed values, and a prompt that talks the model into "ok" gets what every prompt gets: the sandbox and the checker. If the call fails or times out, the request is let through.
 - A screened-out prompt costs one small model call and no job. Each attempt needs a fresh captcha and the route accepts ten requests per visitor per minute.
 - A monthly spend limit on the Anthropic workspace as the outer bound.
-- Visitor addresses are stored only as keyed hashes. Jobs are deleted from the database and published apps from the apps repository after 30 days.
+- Visitor addresses are stored only as keyed hashes. Job records are deleted after 30 days. Published apps are removed from the apps repository after one day, or after ten for an app requested from an account.
+
+### The attacker targets the accounts
+
+- Logging in is optional and has no password to steal: Supabase Auth mails a link and a code. The orchestrator verifies each login token against the project's public keys, with the algorithm, issuer and audience pinned, and uses nothing from it but the account id. Other claims in a token are partly written by the user.
+- The server holds no Supabase secret, and the website only the publishable key. A break-in here yields no access to the addresses.
+- A token that does not verify ends the request. It is never read as "not logged in", which would hand the visitor an anonymous app they believe is theirs.
+- An account costs nothing to create, so it buys nothing an address does not already get: the hourly limit and the daily budget are counted per address and per account. What an account changes is the lifetime of its apps.
+- The list of someone's apps is answered only for the account in a verified token. Watching a build still needs nothing but the job id, as before.
+- Anyone can ask for a login mail to any address. The form is behind a captcha that Supabase checks, and Supabase limits how often mail goes out, in total and per address.
 
 ## Known trade-offs
 
