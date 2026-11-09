@@ -50,16 +50,16 @@ describe('schema migrations', () => {
 
     expect(store.getJob('done1')).toMatchObject({ appId: 'done1', prompt: 'request done1', status: 'done', createdAt: created })
     expect(store.events('done1')).toHaveLength(1)
-    expect(store.getApp('done1')).toEqual({ id: 'done1', createdAt: created, expiresAt: created + 30 * DAY })
+    expect(store.getApp('done1')).toEqual({ id: 'done1', ownerId: null, createdAt: created, expiresAt: created + 30 * DAY })
     expect(store.getApp('failed1')).toBeUndefined()
     expect(store.liveAppIds().sort()).toEqual(['done1', 'queued1'])
     expect(store.nextQueued()).toMatchObject({ id: 'queued1', appId: 'queued1' })
 
-    store.createJob('fresh1', 'a new request', 'h', Date.now() + DAY)
+    store.createJob({ id: 'fresh1', prompt: 'a new request', ipHash: 'h', expiresAt: Date.now() + DAY })
     expect(store.getJob('fresh1')!.appId).toBe('fresh1')
     expect(store.costSince(0)).toBe(0)
     store.close()
-    expect(version()).toBe(3)
+    expect(version()).toBe(4)
   })
 
   it('keeps a copy of the old file and removes it with the records it mirrors', () => {
@@ -94,30 +94,33 @@ describe('schema migrations', () => {
     expect(version()).toBe(1)
   })
 
-  it('adds up what jobs cost, for everyone or for one visitor', () => {
+  it('adds up jobs and what they cost: for everyone, one address or one account', () => {
     const store = new Store(path)
     const now = Date.now()
-    store.createJob('a', 'first', 'alice', now + DAY, now - 2 * DAY)
-    store.createJob('b', 'second', 'alice', now + DAY)
-    store.createJob('c', 'third', 'bob', now + DAY)
+    store.createJob({ id: 'a', prompt: 'first', ipHash: 'alice', userId: 'user-1', expiresAt: now + DAY, now: now - 2 * DAY })
+    store.createJob({ id: 'b', prompt: 'second', ipHash: 'alice', expiresAt: now + DAY })
+    store.createJob({ id: 'c', prompt: 'third', ipHash: 'bob', userId: 'user-1', expiresAt: now + DAY })
     store.setCost('a', 700_000)
     store.setCost('b', 250_000.4)
     store.setCost('c', 50_000)
 
     expect(store.costSince(0)).toBe(1_000_001)
     expect(store.costSince(now - DAY)).toBe(300_001)
-    expect(store.costSince(now - DAY, 'alice')).toBe(250_001)
-    expect(store.costSince(now - DAY, 'nobody')).toBe(0)
+    expect(store.costSince(now - DAY, { ipHash: 'alice' })).toBe(250_001)
+    expect(store.costSince(now - DAY, { ipHash: 'nobody' })).toBe(0)
+    expect(store.costSince(0, { userId: 'user-1' })).toBe(750_000)
+    expect(store.countSince(0, { userId: 'user-1' })).toBe(2)
+    expect(store.countSince(0, { ipHash: 'alice' })).toBe(2)
     store.close()
   })
 
   it('leaves an up-to-date file alone and makes no copy of an empty one', () => {
     new Store(path).close()
-    expect(version()).toBe(3)
+    expect(version()).toBe(4)
     expect(existsSync(`${path}.bak`)).toBe(false)
 
     const store = new Store(path)
-    store.createJob('fresh1', 'a new request', 'h', Date.now() + DAY)
+    store.createJob({ id: 'fresh1', prompt: 'a new request', ipHash: 'h', expiresAt: Date.now() + DAY })
     store.close()
     new Store(path).close()
     expect(existsSync(`${path}.bak`)).toBe(false)

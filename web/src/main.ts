@@ -2,8 +2,9 @@ import '@fontsource-variable/hepta-slab/wght.css'
 import '@fontsource-variable/instrument-sans/wght.css'
 import '@fontsource/ibm-plex-mono/latin-400.css'
 import './style.css'
+import { API, authHeader, hasLogin, timeLeft } from './account'
+import { mountCaptcha } from './captcha'
 
-const API = import.meta.env.VITE_API_BASE ?? 'http://localhost:8787'
 // Cloudflare's always-pass test key, used when no real key is configured.
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITEKEY ?? '1x00000000000000000000AA'
 
@@ -45,7 +46,6 @@ const result = $('result')
 const resultLink = $<HTMLAnchorElement>('result-link')
 
 let captchaToken = ''
-let captchaWidget: string | undefined
 let source: EventSource | undefined
 let clock: number | undefined
 let startedAt = 0
@@ -102,12 +102,7 @@ const stopClock = () => {
 }
 
 // How long the app stays online from now, measured on the server's clock.
-const lifetime = (job: JobState) => {
-  if (!job.expiresAt) return ''
-  const hours = Math.max(1, Math.round((job.expiresAt - (job.now ?? Date.now())) / 3_600_000))
-  const [count, unit] = hours < 48 ? [hours, 'hour'] : [Math.round(hours / 24), 'day']
-  return ` It stays online for ${count} ${unit}${count === 1 ? '' : 's'}.`
-}
+const lifetime = (job: JobState) => (job.expiresAt ? ` It stays online for ${timeLeft(job.expiresAt, job.now ?? Date.now())}.` : '')
 
 // "failed" is not a station: the job stops wherever it was.
 let lastStation: Status = 'queued'
@@ -218,13 +213,20 @@ form.addEventListener('submit', async (event) => {
   showFormError()
   busy = true
   refreshSubmit()
+  // A login that has run out must not turn into an anonymous app without a word.
+  const wasLoggedIn = hasLogin()
+  const login = await authHeader().catch(() => ({}))
+  if (wasLoggedIn && !('authorization' in login)) {
+    busy = false
+    refreshSubmit()
+    return showFormError('Your login has run out. Log in again under "My apps", or send the request once more to build without an account.')
+  }
   const res = await fetch(`${API}/api/jobs`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...login },
     body: JSON.stringify({ prompt: prompt.value, captchaToken }),
   }).catch(() => null)
-  captchaToken = ''
-  window.turnstile?.reset(captchaWidget)
+  resetCaptcha()
 
   const body = await res?.json().catch(() => null)
   if (!res?.ok || !body?.id) {
@@ -262,23 +264,10 @@ $('copy').addEventListener('click', async () => {
   window.setTimeout(() => ($('copy').textContent = 'Copy link'), 2000)
 })
 
-window.onTurnstileLoad = () => {
-  captchaWidget = window.turnstile!.render('#captcha', {
-    sitekey: SITE_KEY,
-    callback: (token) => {
-      captchaToken = token
-      refreshSubmit()
-    },
-    'expired-callback': () => {
-      captchaToken = ''
-      refreshSubmit()
-    },
-  })
-}
-const script = document.createElement('script')
-script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad'
-script.async = true
-document.head.append(script)
+const resetCaptcha = mountCaptcha('#captcha', SITE_KEY, (token) => {
+  captchaToken = token
+  refreshSubmit()
+})
 
 const resumed = /^#job=([a-z2-7]{20})$/.exec(location.hash)?.[1]
 if (resumed) watch(resumed)

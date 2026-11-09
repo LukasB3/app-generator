@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { noAuth, supabaseAuth } from './auth.js'
 import { loadConfig } from './config.js'
 import { createPipeline } from './pipeline.js'
 import { createAppCleanup } from './publish.js'
@@ -26,15 +27,25 @@ for (const name of readdirSync(jobsDir)) rmSync(join(jobsDir, name), { recursive
 // the visitor hash, are kept for 30 days for the limits and for debugging.
 const RETENTION_MS = 30 * 24 * 3_600_000
 const removeExpiredApps = createAppCleanup(cfg)
+// A free Supabase project is paused after a week without database activity,
+// and logins would stop with it. Reading one row counts as activity.
+const touchSupabase = async () => {
+  if (!cfg.SUPABASE_URL || !cfg.SUPABASE_KEY) return
+  const res = await fetch(`${cfg.SUPABASE_URL}/rest/v1/heartbeat?select=id`, { headers: { apikey: cfg.SUPABASE_KEY, 'accept-profile': 'apps' }, signal: AbortSignal.timeout(10_000) })
+  if (!res.ok) throw new Error(`Supabase answered ${res.status}`)
+}
+
 const purge = async () => {
   await removeExpiredApps(() => store.liveAppIds()).catch((error: unknown) => console.error('app cleanup failed', error))
   store.purgeOlderThan(Date.now() - RETENTION_MS)
+  await touchSupabase().catch((error: unknown) => console.error('Supabase keep-alive failed', error))
 }
 void purge()
 setInterval(() => void purge(), 3_600_000).unref()
 
 const worker = new Worker(store, createPipeline(cfg))
-const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg) })
+const auth = cfg.SUPABASE_URL ? supabaseAuth(cfg.SUPABASE_URL) : noAuth
+const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg), auth })
 
 await app.listen({ host: cfg.HOST, port: cfg.PORT })
 worker.kick()

@@ -1,12 +1,13 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
-import Fastify, { type FastifyReply } from 'fastify'
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import type { OutgoingHttpHeaders } from 'node:http'
 import { z } from 'zod'
+import { AuthError, type Auth } from './auth.js'
 import type { Config } from './config.js'
 import type { PromptScreen } from './screen.js'
-import type { Job, JobEvent, Store } from './store.js'
+import type { Job, JobEvent, Store, Who } from './store.js'
 import type { CaptchaCheck } from './turnstile.js'
 import type { Worker } from './worker.js'
 
@@ -28,6 +29,7 @@ export interface ServerDeps {
   worker: Worker
   captcha: CaptchaCheck
   screen: PromptScreen
+  auth: Auth
 }
 
 const SCREENED_OUT = {
@@ -35,7 +37,7 @@ const SCREENED_OUT = {
   abusive: 'This request is against the rules of this demo: no hateful, sexual or unlawful content. Please describe a different app.',
 }
 
-export const buildServer = async ({ cfg, store, worker, captcha, screen }: ServerDeps) => {
+export const buildServer = async ({ cfg, store, worker, captcha, screen, auth }: ServerDeps) => {
   // Caddy on the same host is the only client, so its forwarded address is trusted.
   // Request logs carry no client address: visitors are only ever stored as keyed hashes.
   const app = Fastify({
@@ -43,7 +45,7 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
     bodyLimit: 16_384,
     logger: { level: 'info', serializers: { req: (req) => ({ method: req.method, url: req.url }) } },
   })
-  await app.register(cors, { origin: cfg.WEB_ORIGIN, methods: ['GET', 'POST'] })
+  await app.register(cors, { origin: cfg.WEB_ORIGIN, methods: ['GET', 'POST'], allowedHeaders: ['content-type', 'authorization'] })
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' })
 
   const submission = z.object({
@@ -66,13 +68,24 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
   })
   const hashIp = (ip: string) => createHmac('sha256', cfg.IP_HASH_SECRET).update(clientKey(ip)).digest('hex').slice(0, 32)
   const refuse = (reply: FastifyReply, status: number, error: string) => reply.code(status).send({ error })
+  // The account behind a request, or null for a visitor who is not logged in.
+  // A login that does not verify is answered here, and undefined comes back.
+  const whoIs = (req: FastifyRequest, reply: FastifyReply) =>
+    auth(req.headers.authorization).catch((error: unknown) => {
+      if (!(error instanceof AuthError)) throw error
+      refuse(reply, 401, 'Your login is no longer valid. Please log in again.')
+      return undefined
+    })
+
+  // A visitor is counted by address and, when logged in, by account as well:
+  // an account can never get more than an address already does.
   // A job's cost is known when it ends, so jobs still waiting or running can
   // take the total past a budget, each by at most the cap for a single job.
-  const limitError = (ipHash: string, now = Date.now()) => {
-    const jobs = (hours: number, visitor?: string) => store.countSince(now - hours * HOUR, visitor)
-    const usd = (hours: number, visitor?: string) => store.costSince(now - hours * HOUR, visitor) / 1e6
-    if (jobs(1, ipHash) >= cfg.JOBS_PER_IP_PER_HOUR) return 'You have reached the hourly limit. Please come back later.'
-    if (usd(24, ipHash) >= cfg.VISITOR_DAILY_BUDGET_USD) return 'You have reached the limit for today. Please come back tomorrow.'
+  const limitError = (visitor: Who[], now = Date.now()) => {
+    const jobs = (hours: number, who?: Who) => store.countSince(now - hours * HOUR, who)
+    const usd = (hours: number, who?: Who) => store.costSince(now - hours * HOUR, who) / 1e6
+    if (visitor.some((who) => jobs(1, who) >= cfg.JOBS_PER_IP_PER_HOUR)) return 'You have reached the hourly limit. Please come back later.'
+    if (visitor.some((who) => usd(24, who) >= cfg.VISITOR_DAILY_BUDGET_USD)) return 'You have reached the limit for today. Please come back tomorrow.'
     if (jobs(1) >= cfg.JOBS_PER_HOUR || jobs(24) >= cfg.JOBS_PER_DAY || usd(24) >= cfg.DAILY_BUDGET_USD || usd(30 * 24) >= cfg.MONTHLY_BUDGET_USD)
       return 'The app generator has reached its capacity for now. Please come back later.'
     if (store.queuedCount() >= cfg.QUEUE_MAX) return 'The queue is full right now. Please try again in a few minutes.'
@@ -83,10 +96,14 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
   app.post('/api/jobs', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
     const parsed = submission.safeParse(req.body)
     if (!parsed.success) return refuse(reply, 400, `Please describe your app in 5 to ${cfg.PROMPT_MAX_CHARS} characters.`)
+    // Before the captcha, which works only once: a stale login should not cost the visitor a solved one.
+    const userId = await whoIs(req, reply)
+    if (userId === undefined) return reply
     if (!(await captcha(parsed.data.captchaToken, req.ip))) return refuse(reply, 403, 'The captcha check failed. Please try again.')
 
     const ipHash = hashIp(req.ip)
-    const overLimit = limitError(ipHash)
+    const visitor: Who[] = userId ? [{ ipHash }, { userId }] : [{ ipHash }]
+    const overLimit = limitError(visitor)
     if (overLimit) return refuse(reply, 429, overLimit)
 
     const id = newJobId()
@@ -97,11 +114,18 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen }: Serve
     }
 
     // Other submissions may have been queued while the screen was running.
-    const nowOverLimit = limitError(ipHash)
+    const nowOverLimit = limitError(visitor)
     if (nowOverLimit) return refuse(reply, 429, nowOverLimit)
-    store.createJob(id, parsed.data.prompt, ipHash, Date.now() + cfg.APP_TTL_H * HOUR)
+    store.createJob({ id, prompt: parsed.data.prompt, ipHash, userId, expiresAt: Date.now() + (userId ? cfg.USER_APP_TTL_H : cfg.APP_TTL_H) * HOUR })
     worker.kick()
     return reply.code(202).send(view(store.getJob(id)!))
+  })
+
+  app.get('/api/apps', async (req, reply) => {
+    const userId = await whoIs(req, reply)
+    if (userId === undefined) return reply
+    if (userId === null) return refuse(reply, 401, 'Please log in to see your apps.')
+    return { apps: store.appsOf(userId), now: Date.now() }
   })
 
   app.get<{ Params: { id: string } }>('/api/jobs/:id', (req, reply) => {

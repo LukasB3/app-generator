@@ -40,6 +40,7 @@ flowchart LR
 | Malicious output is published | The checker allows only `.html`, `.css`, `.js`, `.json` and `.txt` within size and count limits, rejects symlinks, secrets, inline scripts, external or absolute URLs, iframes, password and card fields, and forms that submit anywhere. HTML is re-serialised with a strict CSP (`connect-src 'none'`, `form-action 'none'`, `script-src 'self'`) and a visible "AI-generated" badge. |
 | Injection through the prompt | The prompt reaches the agent on stdin only. Job ids are generated server-side and are the only request-derived value in any path or command. Every subprocess is started with an argument array, never through a shell. |
 | Nonsense or abusive requests | One short classification call (Claude Haiku 5.5, through the key proxy with a job token) before a job is queued. It is a courtesy filter, not a boundary: its answer is one of three fixed values, and a prompt that fools it only reaches the sandbox and the checker like any other. If the call fails, the request goes through. |
+| Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online. |
 | Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
 The full reasoning, including the trade-offs that remain, is in [docs/threat-model.md](docs/threat-model.md).
@@ -84,6 +85,8 @@ sudo ./infra/deploy.sh
 
 The website is a Vercel project with `web/` as its root directory and `VITE_API_BASE` and `VITE_TURNSTILE_SITEKEY` set.
 
+Accounts are optional. They need a Supabase project with e-mail login, its own SMTP provider and Turnstile as captcha. Set `SUPABASE_URL` and `SUPABASE_KEY` (the publishable key) in `orchestrator.env`, and `VITE_SUPABASE_URL`, `VITE_SUPABASE_KEY` and `VITE_TURNSTILE_LOGIN_SITEKEY` for the website, and add the project's `/auth/v1/` address to `connect-src` in `web/vercel.json`. Without these settings nobody can log in and everything else works the same.
+
 ## Limits
 
 | Setting | Default |
@@ -91,12 +94,13 @@ The website is a Vercel project with `web/` as its root directory and `VITE_API_
 | Jobs running at once | 1 |
 | Job timeout | 15 minutes |
 | Job budget | 120 requests, 250,000 output tokens, $4 |
-| Jobs per visitor | 3 per hour, $5 per day |
+| Jobs per visitor | 3 per hour, $5 per day, by address and by account |
 | Jobs overall | 10 per hour, 30 per day, $10 per day, $90 per 30 days |
 | Queue length | 10 |
 | Prompt length | 1,000 characters |
 | App size | 30 files, 300 kB per file, 1.5 MB in total |
-| App lifetime | 30 days, then removed from the apps repository |
+| App lifetime | 1 day, or 10 days when requested from an account, then removed from the apps repository |
+| Job records | 30 days |
 
 Dollar budgets count what finished jobs have cost, so jobs that are still waiting or running can take a total past its budget, each by at most the cap for one job.
 

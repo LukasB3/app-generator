@@ -29,7 +29,14 @@ const schema = z.object({
   VISITOR_DAILY_BUDGET_USD: z.coerce.number().positive().default(5),
   DAILY_BUDGET_USD: z.coerce.number().positive().default(10),
   MONTHLY_BUDGET_USD: z.coerce.number().positive().default(90),
-  APP_TTL_H: z.coerce.number().int().positive().default(720),
+  // How long an app stays online: built anonymously, or by someone logged in.
+  APP_TTL_H: z.coerce.number().int().positive().default(24),
+  USER_APP_TTL_H: z.coerce.number().int().positive().default(240),
+
+  // The Supabase project that holds the accounts. Without it nobody can log
+  // in and everything else works as before. The key is the publishable one.
+  SUPABASE_URL: z.url().optional(),
+  SUPABASE_KEY: z.string().min(1).optional(),
 
   APPS_REPO: z.string().default('git@github.com:LukasB3/app-generator-apps.git'),
   APPS_BASE_URL: z.url().default('https://lukasb3.github.io/app-generator-apps'),
