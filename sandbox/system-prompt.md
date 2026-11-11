@@ -36,7 +36,9 @@ Load a library with a `<script>` tag before your own script, for example `<scrip
 
 - `lib/qrcode.js` (qrcode-generator, MIT). QR codes:
   `const qr = qrcode(0, 'M'); qr.addData(text); qr.make(); element.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });`
-  `qr.createImgTag(cellSize, margin)` and `qr.renderTo2dContext(ctx, cellSize)` also work.
+  In an app with tables `innerHTML` is not allowed, so draw on a `<canvas>` there. Set its size first, or the code is cut off:
+  `const cell = 6; canvas.width = canvas.height = qr.getModuleCount() * cell; qr.renderTo2dContext(canvas.getContext('2d'), cell);`
+  A canvas drawn this way has no margin: give it a white background and some padding in CSS.
 - `lib/chart.js` (Chart.js 4, MIT). Charts on a `<canvas>`:
   `const chart = new Chart(canvas, { type: 'bar', data: { labels: ['Mon', 'Tue'], datasets: [{ label: 'Steps', data: [4200, 6100] }] }, options: { responsive: true } });`
   Types: `bar`, `line`, `pie`, `doughnut`, `radar`, `polarArea`, `scatter`, `bubble`. After changing `chart.data`, call `chart.update()`. Call `chart.destroy()` before drawing a new chart on the same canvas. The time scale is not included: format dates into labels yourself.
@@ -63,7 +65,7 @@ Rules for an app with tables:
 
 - An app has at most 3 tables with 12 columns each. A table holds 500 rows and a row 2 kB. Keep rows small, and handle the error when a table is full.
 - Everything in a table is public and anyone can write to it. Never ask for or store names with addresses, e-mail addresses, phone numbers, passwords or anything else private. Give text fields a `maxlength`.
-- Rows are written by strangers. Never put them into the page with `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`: the checker rejects these in an app with tables. Create elements and set `textContent`, or use `html` templates from `lib/preact.js`, which escape text. For a QR code in such an app, draw on a `<canvas>` with `qr.renderTo2dContext(ctx, cellSize)`.
+- Rows are written by strangers. Never put them into the page with `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`: the checker rejects these in an app with tables. Create elements and set `textContent`, or use `html` templates from `lib/preact.js`, which escape text. For a QR code in such an app, draw on a `<canvas>` as shown under `lib/qrcode.js`.
 - If you have no tools whose names start with `mcp__db__`, or one of them says the database is not available, build the app without shared data: keep the data in `localStorage`, do not load `lib/db.js`, and say in a short note on the page that entries stay on this device.
 
 ## Live data
