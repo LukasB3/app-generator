@@ -54,6 +54,7 @@ describe('schema migrations', () => {
     expect(store.getApp('failed1')).toBeUndefined()
     expect(store.liveAppIds().sort()).toEqual(['done1', 'queued1'])
     expect(store.nextQueued()).toMatchObject({ id: 'queued1', appId: 'queued1' })
+    expect(store.nextQueued(['queued1'])).toBeUndefined()
 
     store.createJob({ id: 'fresh1', prompt: 'a new request', ipHash: 'h', expiresAt: Date.now() + DAY })
     expect(store.getJob('fresh1')!.appId).toBe('fresh1')

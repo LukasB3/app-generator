@@ -9,7 +9,7 @@ The project is built on one assumption: **every prompt is malicious and the agen
 ```mermaid
 flowchart LR
   V[Visitor] -->|prompt + captcha| W[Website<br/>Vercel]
-  W -->|POST /api/jobs, SSE| O[Orchestrator<br/>queue, one job at a time]
+  W -->|POST /api/jobs, SSE| O[Orchestrator<br/>queue, two jobs at a time]
   subgraph VPS[Hetzner VPS]
     O -->|job id| L[Launcher<br/>root-owned, fixed settings]
     L -->|starts, kills| S[Sandbox container<br/>Claude Code, file tools only]
@@ -48,7 +48,7 @@ flowchart LR
 | Agent goes for the database | It never touches it. Its three tools reach a gateway that accepts "create a table" and "add a column", checks names, types and limits, and writes the wish down. The orchestrator has the wishes applied in one transaction after the checker has passed the app, so a rejected app leaves nothing behind. The gateway builds every statement itself and logs in as a role with rights on one schema and no way to the accounts, which it checks about itself before it does any work. That role's password is made on the server and reaches the database only as a SCRAM verifier. |
 | Data in an app's tables | It is public, and the app says so on the page: every visitor can read all rows and add rows, and in tables made for it change and delete them. Row level security and explicit grants fix that per table when it is created; logged-in accounts get nothing extra. A trigger caps a table at 500 rows and a row at 2 kB, an app gets three tables, and tables are dropped with their app. A page can therefore store what a visitor types where others can read it. Apps must not ask for anything private, and the checker rejects password and card fields as before. |
 | Live data | An app can show the weather and exchange rates. It asks this API, which knows four fixed questions with typed parameters, builds the address of the source itself, follows no redirect, and writes its own answer from the fields it expects. Only a page that loads the library for it may send requests there, and the API answers published apps on these routes only. Requests are limited per address and per day. |
-| Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, one job at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
+| Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, at most two jobs at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
 The full reasoning, including the trade-offs that remain, is in [docs/threat-model.md](docs/threat-model.md).
 
@@ -107,7 +107,7 @@ Accounts are optional. They need a Supabase project with e-mail login, its own S
 
 | Setting | Default |
 | --- | --- |
-| Jobs running at once | 1 |
+| Jobs running at once | 2 |
 | Job timeout | 15 minutes |
 | Job budget | 120 requests, 250,000 output tokens, $4 |
 | Jobs per visitor | 3 per hour, $5 per day, by address and by account |

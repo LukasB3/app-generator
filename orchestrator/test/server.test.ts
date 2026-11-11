@@ -45,7 +45,7 @@ const auth: Auth = async (authorization) => {
 const setup = async (pipeline: Pipeline, overrides: Partial<Config> = {}, screen: PromptScreen = async () => 'ok') => {
   store = new Store(':memory:')
   captchaChecks = 0
-  const worker = new Worker(store, pipeline, () => {})
+  const worker = new Worker(store, pipeline, overrides.JOBS_AT_ONCE ?? 1, () => {})
   const captcha = async (token: string) => {
     captchaChecks++
     return token === 'good'
@@ -100,6 +100,25 @@ describe('POST /api/jobs', () => {
     expect(done.events.map((e: { type: string; data: string }) => `${e.type}:${e.data}`)).toEqual(['status:queued', 'status:coding', 'file:index.html', 'status:done'])
     expect(await state(second.id)).toMatchObject({ status: 'coding', position: 0 })
     expect(await state(third.id)).toMatchObject({ status: 'queued', position: 1 })
+  })
+
+  it('runs two jobs side by side when there is room for two, and the third waits', async () => {
+    await setup(gated, { JOBS_AT_ONCE: 2 })
+    const first = (await submit()).json()
+    const second = (await submit('a timer', '203.0.113.2')).json()
+    const third = (await submit('a clock', '203.0.113.3')).json()
+
+    const state = async (id: string) => (await app.inject({ url: `/api/jobs/${id}` })).json()
+    expect(await state(first.id)).toMatchObject({ status: 'coding', position: 0 })
+    expect(await state(second.id)).toMatchObject({ status: 'coding', position: 0 })
+    expect(await state(third.id)).toMatchObject({ status: 'queued', position: 1 })
+    expect(release).toHaveLength(2)
+
+    release.shift()!()
+    await expect.poll(async () => (await state(first.id)).status).toBe('done')
+    expect(await state(second.id)).toMatchObject({ status: 'coding' })
+    expect(await state(third.id)).toMatchObject({ status: 'coding', position: 0 })
+    expect(release).toHaveLength(2)
   })
 
   it('refuses a failed captcha and bad prompts', async () => {

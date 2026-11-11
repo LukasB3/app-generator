@@ -118,7 +118,7 @@ const render = (job: JobState) => {
   const waiting = lastStage === 'queued'
   showSteps(waiting ? 1 : ORDER.indexOf(lastStage), job.status === 'done' ? 'over' : job.status === 'failed' ? 'stopped' : waiting ? 'ahead' : 'now')
 
-  if (job.status === 'queued') setStatus('waiting', job.position <= 1 ? 'You are next in line.' : `Place ${job.position} in line.`, 'One app is built at a time. Yours starts when the one ahead is finished.')
+  if (job.status === 'queued') setStatus('waiting', job.position <= 1 ? 'You are next in line.' : `Place ${job.position} in line.`, 'Two apps are built at a time. Yours starts when one of them is finished.')
   else if (job.status === 'done') setStatus('done', 'Your app is live.', lifetime(job))
   else if (job.status === 'failed') setStatus('failed', 'The build failed.', job.error ?? 'This app could not be built.')
   else startClock()
