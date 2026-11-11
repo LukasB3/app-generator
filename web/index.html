@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Describe a small web app. An AI agent writes it inside a sandbox, plain code checks every file, and you get a link to the live result." />
     <title>App Generator</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1650'/%3E%3Cpath d='M8 16h16' stroke='%23736cc9' stroke-width='2'/%3E%3Ccircle cx='7.5' cy='16' r='3' fill='%23f3f1ff'/%3E%3Ccircle cx='24.5' cy='16' r='3' fill='%23f3f1ff'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23ffd23f'/%3E%3C/svg%3E" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
   <body>
     <header class="bar">
@@ -26,8 +26,8 @@
             <textarea id="prompt" name="prompt" rows="3" maxlength="1000" required aria-label="Describe a small web app" placeholder="Describe a small web app and get a link to it a few minutes later."></textarea>
             <div class="tools">
               <ul class="examples" aria-label="Examples">
-                <li><button type="button">A Space Invaders game</button></li>
-                <li><button type="button">A weather forecast for any city</button></li>
+                <li><button type="button" data-prompt="A Space Invaders game">Space Invaders</button></li>
+                <li><button type="button" data-prompt="A weather forecast for any city">Weather forecast</button></li>
               </ul>
               <span id="count" aria-hidden="true"></span>
               <span id="hint" role="status"></span>
@@ -72,7 +72,6 @@
             <i class="mark"></i>
             <strong>Coding</strong>
             <span>An AI agent writes the files.<br />No shell, no internet, no real keys.</span>
-            <ul class="files" id="files"></ul>
           </li>
           <li data-status="checking">
             <i class="mark"></i>
