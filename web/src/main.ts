@@ -34,9 +34,10 @@ const board = $('job')
 const result = $('result')
 const resultLink = $<HTMLAnchorElement>('result-link')
 const fileList = $('files')
-// The steps stand in the page, in the order every job takes them.
+// The steps stand in the page, in the order every request takes them. The
+// first has no job status: the server screens a request before it makes a job.
 const stages = [...document.querySelectorAll<HTMLLIElement>('#stages > li')]
-const ORDER = stages.map((stage) => stage.dataset.status as Status)
+const ORDER = stages.map((stage) => stage.dataset.status)
 const IDLE_TITLE = $('status-title').textContent
 
 let captchaToken = ''
@@ -58,7 +59,7 @@ const el = (tag: string, text = '', className = '') => {
 }
 
 // The line above the steps: what is happening to this visitor's job right now.
-const setStatus = (state: 'idle' | 'waiting' | 'building' | 'done' | 'failed', title: string, note = '') => {
+const setStatus = (state: 'idle' | 'screening' | 'waiting' | 'building' | 'done' | 'failed', title: string, note = '') => {
   board.dataset.state = state
   board.classList.remove('intro')
   $('status-title').textContent = title
@@ -94,20 +95,28 @@ const stopClock = () => {
 // How long the app stays online from now, measured on the server's clock.
 const lifetime = (job: JobState) => (job.expiresAt ? `It stays online for ${timeLeft(job.expiresAt, job.now ?? Date.now())}.` : '')
 
-// "failed" is not a step: the job stops wherever it was.
+// Marks the steps: those before `at` are over. The one at `at` runs, is where
+// things stopped, or is still ahead while the job waits for its turn.
+const showSteps = (at: number, there: 'now' | 'stopped' | 'ahead' | 'over') => {
+  stages.forEach((node, index) => {
+    node.classList.toggle('past', index < at || there === 'over')
+    node.classList.toggle('now', index === at && there === 'now')
+    node.classList.toggle('stopped', index === at && there === 'stopped')
+    // The line into a step that a job waits for keeps moving.
+    node.classList.toggle('wait', index === at - 1 && there === 'ahead')
+    if (index === at && there === 'now') node.setAttribute('aria-current', 'step')
+    else node.removeAttribute('aria-current')
+  })
+}
+
+// "failed" is not a step: the job stops wherever it was. A queued job has
+// passed the screen and waits in front of the next step.
 let lastStage: Status = 'queued'
 const render = (job: JobState) => {
   if (job.now) clockAhead = Date.now() - job.now
   if (job.status !== 'failed') lastStage = job.status
-  const reached = ORDER.indexOf(lastStage)
-  stages.forEach((node, index) => {
-    node.classList.toggle('past', index < reached || job.status === 'done')
-    const now = index === reached && job.status !== 'done' && job.status !== 'failed'
-    node.classList.toggle('now', now)
-    if (now) node.setAttribute('aria-current', 'step')
-    else node.removeAttribute('aria-current')
-    node.classList.toggle('stopped', index === reached && job.status === 'failed')
-  })
+  const waiting = lastStage === 'queued'
+  showSteps(waiting ? 1 : ORDER.indexOf(lastStage), job.status === 'done' ? 'over' : job.status === 'failed' ? 'stopped' : waiting ? 'ahead' : 'now')
 
   if (job.status === 'queued') setStatus('waiting', job.position <= 1 ? 'You are next in line.' : `Place ${job.position} in line.`, 'One app is built at a time. Yours starts when the one ahead is finished.')
   else if (job.status === 'done') setStatus('done', 'Your app is live.', lifetime(job))
@@ -184,10 +193,7 @@ const reset = () => {
   history.replaceState(null, '', location.pathname)
   fileList.replaceChildren()
   result.hidden = true
-  stages.forEach((node) => {
-    node.classList.remove('past', 'now', 'stopped')
-    node.removeAttribute('aria-current')
-  })
+  showSteps(-1, 'ahead')
   setStatus('idle', IDLE_TITLE)
   refreshSubmit()
 }
@@ -215,6 +221,11 @@ form.addEventListener('submit', async (event) => {
     refreshSubmit()
     return showFormError('Your login has run out. Log in again under "My apps", or send the request once more to build without an account.')
   }
+  // The server screens the request before it answers, so the first step runs while this waits.
+  fileList.replaceChildren()
+  result.hidden = true
+  showSteps(0, 'now')
+  setStatus('screening', 'Screening your request')
   const res = await fetch(`${API}/api/jobs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...login },
@@ -223,16 +234,23 @@ form.addEventListener('submit', async (event) => {
   resetCaptcha()
 
   const body = await res?.json().catch(() => null)
+  const showBoard = () => board.scrollIntoView({ behavior: 'smooth', block: narrow.matches ? 'start' : 'nearest' })
   if (!res?.ok || !body?.id) {
     busy = false
     refreshSubmit()
+    // 422 is the screen's own answer, so it is shown where the screen stands.
+    if (res?.status === 422 && body?.error) {
+      showSteps(0, 'stopped')
+      setStatus('failed', 'This request was turned away.', body.error)
+      return showBoard()
+    }
+    showSteps(-1, 'ahead')
+    setStatus('idle', IDLE_TITLE)
     return showFormError(body?.error ?? 'The app generator could not be reached. Check your connection and try again.')
   }
-  fileList.replaceChildren()
-  result.hidden = true
   history.replaceState(null, '', `#job=${body.id}`)
   render(body)
-  board.scrollIntoView({ behavior: 'smooth', block: narrow.matches ? 'start' : 'nearest' })
+  showBoard()
   watch(body.id)
 })
 
@@ -260,9 +278,10 @@ const resetCaptcha = mountCaptcha('#captcha', SITE_KEY, (token) => {
   if (send) form.requestSubmit()
 })
 
-// Logged in, an app stays for ten days, and the line under the form says so.
+// Logged in, an app stays for ten days and can be changed, and the line under the form says so.
 void account.then((address) => {
-  if (address) $('lifetime').textContent = 'ten days'
+  $('stay-out').hidden = address !== null
+  $('stay-in').hidden = address === null
 })
 
 const resumed = /^#job=([a-z2-7]{20})$/.exec(location.hash)?.[1]

@@ -13,7 +13,6 @@
       <nav aria-label="About this project">
         <a href="safety">How it stays safe</a>
         <a href="why">Why I built this</a>
-        <a href="https://github.com/LukasB3/app-generator" rel="noopener">GitHub</a>
       </nav>
       <p class="who" id="who" hidden><span>Not logged in</span> <a href="apps">Log in</a></p>
     </header>
@@ -23,9 +22,8 @@
         <h1><span>An AI agent writes your app.</span> <span>Plain code decides whether it goes live.</span></h1>
 
         <form id="order" novalidate>
-          <label class="lede" for="prompt">Describe a small web app and get a link to it a few minutes later.</label>
           <div class="composer">
-            <textarea id="prompt" name="prompt" rows="3" maxlength="1000" required placeholder="A drum machine with a 16-step grid, four sounds and a tempo slider"></textarea>
+            <textarea id="prompt" name="prompt" rows="3" maxlength="1000" required aria-label="Describe a small web app" placeholder="Describe a small web app and get a link to it a few minutes later."></textarea>
             <div class="tools">
               <ul class="examples" aria-label="Examples">
                 <li><button type="button">A Space Invaders game</button></li>
@@ -38,7 +36,9 @@
           </div>
           <div id="captcha"></div>
           <p id="form-error" role="alert" hidden></p>
-          <p class="terms">Apps are public and stay online for <span id="lifetime">one day, or ten if you <a href="apps">log in</a></span>. Leave out personal data. By building you accept the <a href="legal#rules">rules</a> and the <a href="legal#privacy">privacy policy</a>.</p>
+          <p class="terms" id="stay-out">Apps are public and deleted after one day. <a href="apps">Log in</a> to keep them for ten and change them later.</p>
+          <p class="terms" id="stay-in" hidden>Apps are public and deleted after ten days. You can change them under <a href="apps">My apps</a>.</p>
+          <p class="terms">No personal data. By building you accept the <a href="legal#rules">rules</a> and the <a href="legal#privacy">privacy policy</a>.</p>
         </form>
       </section>
 
@@ -56,10 +56,10 @@
         </div>
 
         <ol class="stages" id="stages">
-          <li data-status="queued">
+          <li data-status="screening">
             <i class="mark"></i>
-            <strong>Queued</strong>
-            <span>One app at a time.</span>
+            <strong>Screening</strong>
+            <span>A small model turns away misuse and personal data.</span>
           </li>
           <li data-status="preparing">
             <i class="mark"></i>
