@@ -1,6 +1,7 @@
 import './page'
 import { accountsEnabled, API, timeLeft } from './account'
 import { mountCaptcha } from './captcha'
+import { showAccount } from './header'
 
 // Two widgets: logging in is checked by the login provider, building by the
 // orchestrator. Cloudflare's always-pass test key stands in for a missing one.
@@ -111,6 +112,7 @@ const start = async () => {
   // Shows the login form or the list, whichever fits the state of the login.
   const show = async () => {
     const address = await session.loggedInAs()
+    showAccount(address)
     $('login').hidden = address !== null
     $('mine').hidden = address === null
     if (address === null) {

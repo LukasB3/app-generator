@@ -3,55 +3,99 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Describe a small web app in plain words. A sandboxed coding agent builds it and you get a link to the live result." />
+    <meta name="description" content="Describe a small web app. An AI agent writes it inside a sandbox, plain code checks every file, and you get a link to the live result." />
     <title>App Generator</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23211a72'/%3E%3Cpath d='M6 10h20v4.5a1.5 1.5 0 0 0 0 3V22H6v-4.5a1.5 1.5 0 0 0 0-3z' fill='%23ffd23f'/%3E%3Cpath d='M20 12v8' stroke='%23211a72' stroke-width='1.5' stroke-dasharray='1.5 1.5'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b1650'/%3E%3Cpath d='M8 16h16' stroke='%23736cc9' stroke-width='2'/%3E%3Ccircle cx='7.5' cy='16' r='3' fill='%23f3f1ff'/%3E%3Ccircle cx='24.5' cy='16' r='3' fill='%23f3f1ff'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23ffd23f'/%3E%3C/svg%3E" />
   </head>
   <body>
-    <main>
-      <h1><span>Describe a small web app.</span> <span>Get a link to it a few minutes later.</span></h1>
-      <p class="lede">A coding agent writes it inside a locked-down container, plain code checks every file, and the result goes live on its own page. One app is built at a time, so you may wait in line. Your app stays online for a day and is then deleted automatically, or for ten days if you <a href="apps">log in</a> first.</p>
+    <header class="bar">
+      <a class="brand" href="./">App Generator</a>
+      <nav aria-label="About this project">
+        <a href="safety">How it stays safe</a>
+        <a href="why">Why I built this</a>
+        <a href="https://github.com/LukasB3/app-generator" rel="noopener">GitHub</a>
+      </nav>
+      <p class="who" id="who" hidden><span>Not logged in</span> <a href="apps">Log in</a></p>
+    </header>
 
-      <label class="ask" for="prompt">What should it be?</label>
-      <div class="bench">
+    <main class="start">
+      <section class="hero">
+        <h1><span>An AI agent writes your app.</span> <span>Plain code decides whether it goes live.</span></h1>
+
         <form id="order" novalidate>
-          <textarea id="prompt" name="prompt" rows="5" maxlength="1000" required placeholder="A drum machine with a 16-step grid, four sounds and a tempo slider"></textarea>
-          <div class="under-field">
-            <ul class="examples" aria-label="Examples">
-              <li><button type="button">A Space Invaders game</button></li>
-              <li><button type="button">A weather forecast for any city</button></li>
-            </ul>
-            <span id="count" aria-hidden="true">0 / 1000</span>
+          <label class="lede" for="prompt">Describe a small web app and get a link to it a few minutes later.</label>
+          <div class="composer">
+            <textarea id="prompt" name="prompt" rows="3" maxlength="1000" required placeholder="A drum machine with a 16-step grid, four sounds and a tempo slider"></textarea>
+            <div class="tools">
+              <ul class="examples" aria-label="Examples">
+                <li><button type="button">A Space Invaders game</button></li>
+                <li><button type="button">A weather forecast for any city</button></li>
+              </ul>
+              <span id="count" aria-hidden="true"></span>
+              <span id="hint" role="status"></span>
+              <button id="submit" type="submit">Build my app</button>
+            </div>
           </div>
-          <p class="scope">Single-page apps only: HTML, CSS and JavaScript that run in the browser. They can keep data that their visitors share and show the weather or exchange rates. No servers or logins of their own.</p>
           <div id="captcha"></div>
           <p id="form-error" role="alert" hidden></p>
-          <button id="submit" type="submit" disabled>Build my app</button>
-          <p class="consent">The result is published on a public page. Do not include personal data. By sending a request you accept the <a href="legal#rules">rules</a> and the <a href="legal#privacy">privacy policy</a>.</p>
+          <p class="terms">Apps are public and stay online for <span id="lifetime">one day, or ten if you <a href="apps">log in</a></span>. Leave out personal data. By building you accept the <a href="legal#rules">rules</a> and the <a href="legal#privacy">privacy policy</a>.</p>
         </form>
+      </section>
 
-        <aside id="job" class="board" aria-live="polite">
-          <div class="ticket" data-state="idle">
-            <p class="ticket-label" id="ticket-label">Your ticket</p>
-            <p class="ticket-figure" id="ticket-figure">No.</p>
-            <p class="ticket-note" id="ticket-note">Send a request to take a place in line.</p>
+      <section id="job" class="board intro" data-state="idle" aria-label="The steps of a build">
+        <div class="status">
+          <div aria-live="polite">
+            <p class="status-title" id="status-title">Every request takes the same six steps.</p>
+            <p class="status-note" id="status-note" hidden></p>
           </div>
-          <ol class="stations" id="stations"></ol>
+          <p id="clock" role="timer" hidden>0:00</p>
           <div class="result" id="result" hidden>
             <a id="result-link" class="open" target="_blank" rel="noopener">Open your app</a>
             <button type="button" id="copy">Copy link</button>
           </div>
-        </aside>
-      </div>
+        </div>
+
+        <ol class="stages" id="stages">
+          <li data-status="queued">
+            <i class="mark"></i>
+            <strong>Queued</strong>
+            <span>One app at a time.</span>
+          </li>
+          <li data-status="preparing">
+            <i class="mark"></i>
+            <strong>Preparing</strong>
+            <span>A fresh container for this job.</span>
+          </li>
+          <li data-status="coding" class="sandbox">
+            <svg class="zone" aria-hidden="true"><rect width="100%" height="100%" rx="14" /></svg>
+            <b class="zone-name">Sandbox</b>
+            <i class="mark"></i>
+            <strong>Coding</strong>
+            <span>An AI agent writes the files.<br />No shell, no internet, no real keys.</span>
+            <ul class="files" id="files"></ul>
+          </li>
+          <li data-status="checking">
+            <i class="mark"></i>
+            <strong>Checking</strong>
+            <span>Plain code checks every file. No AI involved.</span>
+          </li>
+          <li data-status="publishing">
+            <i class="mark"></i>
+            <strong>Publishing</strong>
+            <span>Only checked files go live.</span>
+          </li>
+          <li data-status="done" class="end">
+            <i class="mark"></i>
+            <strong>Done</strong>
+            <span>You get a link.</span>
+          </li>
+        </ol>
+      </section>
     </main>
 
-    <footer>
-      <div>
-        <p>Created by <a href="https://lukasbossert.com" rel="noopener">Lukas Bossert</a>. Generated apps are demos and may be removed at any time.</p>
-        <p>Read <a href="safety">how it stays safe</a> and <a href="why">why I built this</a>.</p>
-      </div>
+    <footer class="deep">
+      <p>Built by <a href="https://lukasbossert.com" rel="noopener">Lukas Bossert</a>. Generated apps are demos and may be removed at any time.</p>
       <nav>
-        <a href="apps">My apps</a>
         <a href="legal">Legal notice and privacy</a>
       </nav>
     </footer>

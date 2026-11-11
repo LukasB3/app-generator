@@ -1,9 +1,8 @@
-import '@fontsource-variable/hepta-slab/wght.css'
-import '@fontsource-variable/instrument-sans/wght.css'
 import '@fontsource/ibm-plex-mono/latin-400.css'
-import './style.css'
+import './page'
 import { API, authHeader, hasLogin, timeLeft } from './account'
 import { mountCaptcha } from './captcha'
+import { account } from './header'
 
 // Cloudflare's always-pass test key, used when no real key is configured.
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITEKEY ?? '1x00000000000000000000AA'
@@ -25,25 +24,20 @@ interface Progress {
   data: string
 }
 
-const STATIONS: [Status, string, string][] = [
-  ['queued', 'Queued', 'One app is built at a time. Yours waits here for its turn.'],
-  ['preparing', 'Preparing', 'A fresh, locked-down container starts for this job only.'],
-  ['coding', 'Coding', 'The agent writes the files.'],
-  ['checking', 'Checking', 'Plain code inspects every file before anything is published.'],
-  ['publishing', 'Publishing', 'The checked files go live on their own page.'],
-  ['done', 'Done', 'Your link is ready.'],
-]
-const ORDER = STATIONS.map(([status]) => status)
-
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 const form = $<HTMLFormElement>('order')
 const prompt = $<HTMLTextAreaElement>('prompt')
 const submit = $<HTMLButtonElement>('submit')
 const narrow = matchMedia('(max-width: 52rem)')
 const formError = $('form-error')
-const ticket = document.querySelector<HTMLElement>('.ticket')!
+const board = $('job')
 const result = $('result')
 const resultLink = $<HTMLAnchorElement>('result-link')
+const fileList = $('files')
+// The steps stand in the page, in the order every job takes them.
+const stages = [...document.querySelectorAll<HTMLLIElement>('#stages > li')]
+const ORDER = stages.map((stage) => stage.dataset.status as Status)
+const IDLE_TITLE = $('status-title').textContent
 
 let captchaToken = ''
 let source: EventSource | undefined
@@ -53,6 +47,8 @@ let startedAt = 0
 let clockAhead = 0
 let busy = false
 let finished = false
+// The visitor asked for a build before the captcha had answered. It is sent as soon as it has.
+let sendWhenChecked = false
 
 const el = (tag: string, text = '', className = '') => {
   const node = document.createElement(tag)
@@ -61,28 +57,22 @@ const el = (tag: string, text = '', className = '') => {
   return node
 }
 
-const stationNodes = new Map<Status, HTMLLIElement>()
-const fileList = el('ul', '', 'files')
-for (const [status, name, description] of STATIONS) {
-  const item = el('li') as HTMLLIElement
-  item.dataset.status = status
-  item.append(el('i', '', 'mark'), el('strong', name), el('span', description))
-  if (status === 'coding') item.append(fileList)
-  if (status === 'done') item.classList.add('end')
-  stationNodes.set(status, item)
-  $('stations').append(item)
-}
-
-const setTicket = (state: string, label: string, figure: string, note: string) => {
-  ticket.dataset.state = state
-  $('ticket-label').textContent = label
-  $('ticket-figure').textContent = figure
-  $('ticket-note').textContent = note
+// The line above the steps: what is happening to this visitor's job right now.
+const setStatus = (state: 'idle' | 'waiting' | 'building' | 'done' | 'failed', title: string, note = '') => {
+  board.dataset.state = state
+  board.classList.remove('intro')
+  $('status-title').textContent = title
+  $('status-note').textContent = note
+  $('status-note').hidden = !note
+  $('clock').hidden = state !== 'building'
 }
 
 const refreshSubmit = () => {
-  submit.disabled = !finished && (busy || !captchaToken || prompt.value.trim().length < 5)
+  submit.disabled = !finished && (busy || sendWhenChecked)
   submit.textContent = finished ? 'Build another app' : busy ? 'Building…' : 'Build my app'
+  // The captcha stays out of sight unless it needs the visitor, so say what the button waits for.
+  $('hint').textContent = sendWhenChecked ? 'Checking that you are not a bot…' : ''
+  $('count').textContent = prompt.value.length >= 800 ? `${prompt.value.length} / ${prompt.maxLength}` : ''
 }
 
 const showFormError = (message = '') => {
@@ -102,16 +92,15 @@ const stopClock = () => {
 }
 
 // How long the app stays online from now, measured on the server's clock.
-const lifetime = (job: JobState) => (job.expiresAt ? ` It stays online for ${timeLeft(job.expiresAt, job.now ?? Date.now())}.` : '')
+const lifetime = (job: JobState) => (job.expiresAt ? `It stays online for ${timeLeft(job.expiresAt, job.now ?? Date.now())}.` : '')
 
-// "failed" is not a station: the job stops wherever it was.
-let lastStation: Status = 'queued'
+// "failed" is not a step: the job stops wherever it was.
+let lastStage: Status = 'queued'
 const render = (job: JobState) => {
   if (job.now) clockAhead = Date.now() - job.now
-  if (job.status !== 'failed') lastStation = job.status
-  const reached = ORDER.indexOf(lastStation)
-  STATIONS.forEach(([status], index) => {
-    const node = stationNodes.get(status)!
+  if (job.status !== 'failed') lastStage = job.status
+  const reached = ORDER.indexOf(lastStage)
+  stages.forEach((node, index) => {
     node.classList.toggle('past', index < reached || job.status === 'done')
     const now = index === reached && job.status !== 'done' && job.status !== 'failed'
     node.classList.toggle('now', now)
@@ -120,9 +109,9 @@ const render = (job: JobState) => {
     node.classList.toggle('stopped', index === reached && job.status === 'failed')
   })
 
-  if (job.status === 'queued') setTicket('waiting', 'Your place in line', String(job.position), job.position <= 1 ? 'You are next.' : 'The line moves when the app ahead of you is finished.')
-  else if (job.status === 'done') setTicket('done', 'Your app is', 'Live', `Open it with the link below.${lifetime(job)}`)
-  else if (job.status === 'failed') setTicket('failed', 'The build', 'Failed', job.error ?? 'This app could not be built.')
+  if (job.status === 'queued') setStatus('waiting', job.position <= 1 ? 'You are next in line.' : `Place ${job.position} in line.`, 'One app is built at a time. Yours starts when the one ahead is finished.')
+  else if (job.status === 'done') setStatus('done', 'Your app is live.', lifetime(job))
+  else if (job.status === 'failed') setStatus('failed', 'The build failed.', job.error ?? 'This app could not be built.')
   else startClock()
 
   if (job.status === 'done' && job.url) {
@@ -131,15 +120,9 @@ const render = (job: JobState) => {
     resultLink.dataset.address = job.url
     const wasHidden = result.hidden
     result.hidden = false
-    $('copy').hidden = false
-    resultLink.hidden = false
     if (wasHidden && narrow.matches) resultLink.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
-  if (job.status === 'failed') {
-    result.hidden = false
-    $('copy').hidden = true
-    resultLink.hidden = true
-  }
+  if (job.status === 'failed') result.hidden = true
   if (job.status === 'done' || job.status === 'failed') {
     stopWatching()
     stopClock()
@@ -152,12 +135,13 @@ const render = (job: JobState) => {
 // Runs independently of the event stream, so reconnecting never stops it.
 const tick = () => {
   const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-  setTicket('building', 'Now building', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 'Most apps take under two minutes. You can leave this page open.')
+  $('clock').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 const startClock = () => {
   if (clock !== undefined) return
   startedAt ||= Date.now()
+  setStatus('building', 'Building your app', 'Most apps take under two minutes. You can leave this page open.')
   tick()
   clock = window.setInterval(tick, 1000)
 }
@@ -196,23 +180,31 @@ const reset = () => {
   stopClock()
   busy = false
   finished = false
-  lastStation = 'queued'
+  lastStage = 'queued'
   history.replaceState(null, '', location.pathname)
   fileList.replaceChildren()
   result.hidden = true
-  stationNodes.forEach((node) => {
+  stages.forEach((node) => {
     node.classList.remove('past', 'now', 'stopped')
     node.removeAttribute('aria-current')
   })
-  setTicket('idle', 'Your ticket', 'No.', 'Send a request to take a place in line.')
+  setStatus('idle', IDLE_TITLE)
   refreshSubmit()
 }
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
   if (finished) return location.assign(location.pathname)
-  if (submit.disabled) return
+  if (busy) return
   showFormError()
+  if (prompt.value.trim().length < 5) {
+    prompt.focus()
+    return showFormError('Describe the app you want in a few words first.')
+  }
+  if (!captchaToken) {
+    sendWhenChecked = true
+    return refreshSubmit()
+  }
   busy = true
   refreshSubmit()
   // A login that has run out must not turn into an anonymous app without a word.
@@ -239,18 +231,12 @@ form.addEventListener('submit', async (event) => {
   fileList.replaceChildren()
   result.hidden = true
   history.replaceState(null, '', `#job=${body.id}`)
-  ticket.classList.remove('printed')
-  void ticket.offsetWidth
-  ticket.classList.add('printed')
-  ticket.scrollIntoView({ behavior: 'smooth', block: narrow.matches ? 'start' : 'nearest' })
   render(body)
+  board.scrollIntoView({ behavior: 'smooth', block: narrow.matches ? 'start' : 'nearest' })
   watch(body.id)
 })
 
-prompt.addEventListener('input', () => {
-  $('count').textContent = `${prompt.value.length} / ${prompt.maxLength}`
-  refreshSubmit()
-})
+prompt.addEventListener('input', refreshSubmit)
 
 document.querySelectorAll<HTMLButtonElement>('.examples button').forEach((button) =>
   button.addEventListener('click', () => {
@@ -268,8 +254,19 @@ $('copy').addEventListener('click', async () => {
 
 const resetCaptcha = mountCaptcha('#captcha', SITE_KEY, (token) => {
   captchaToken = token
+  const send = sendWhenChecked && token !== ''
+  if (send) sendWhenChecked = false
   refreshSubmit()
+  if (send) form.requestSubmit()
+})
+
+// Logged in, an app stays for ten days, and the line under the form says so.
+void account.then((address) => {
+  if (address) $('lifetime').textContent = 'ten days'
 })
 
 const resumed = /^#job=([a-z2-7]{20})$/.exec(location.hash)?.[1]
-if (resumed) watch(resumed)
+if (resumed) {
+  board.classList.remove('intro')
+  watch(resumed)
+}
