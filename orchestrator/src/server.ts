@@ -39,6 +39,7 @@ export interface ServerDeps {
 const SCREENED_OUT = {
   nonsense: 'That does not read like an app idea yet. Describe what the app should do, for example "a 5-minute timer with a QR code".',
   abusive: 'This request is against the rules of this demo: no hateful, sexual or unlawful content. Please describe a different app.',
+  personal: 'This request contains personal data. Leave out names, addresses, phone numbers and similar details, and send it again.',
 }
 
 export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, data, logTo }: ServerDeps) => {

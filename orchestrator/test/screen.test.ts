@@ -59,7 +59,7 @@ describe('promptScreen', () => {
     logged.length = 0
   })
 
-  it.each(['ok', 'nonsense', 'abusive'] as const)('returns the verdict "%s"', async (verdict) => {
+  it.each(['ok', 'nonsense', 'abusive', 'personal'] as const)('returns the verdict "%s"', async (verdict) => {
     respond = answer(message(JSON.stringify({ verdict })))
     expect(await screen()('a pomodoro timer', 'job1')).toBe(verdict)
     expect(logged).toEqual([])
