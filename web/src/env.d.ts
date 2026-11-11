@@ -11,7 +11,7 @@ interface ImportMetaEnv {
 interface Turnstile {
   render(
     container: string,
-    options: { sitekey: string; callback: (token: string) => void; 'expired-callback'?: () => void },
+    options: { sitekey: string; appearance?: 'always' | 'execute' | 'interaction-only'; callback: (token: string) => void; 'expired-callback'?: () => void },
   ): string
   reset(widget?: string): void
 }

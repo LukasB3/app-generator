@@ -9,13 +9,14 @@ const turnstile = () =>
     document.head.append(script)
   }))
 
-// Puts a widget into `container`. `onToken` gets each solved token, and an
-// empty string when one expires. Returns a function that asks for a fresh
-// token, since each one works only once.
+// Puts a widget into `container`. It shows itself only when the visitor has
+// to do something. `onToken` gets each solved token, and an empty string when
+// one expires. Returns a function that asks for a fresh token, since each one
+// works only once.
 export const mountCaptcha = (container: string, sitekey: string, onToken: (token: string) => void) => {
   let widget: string | undefined
   void turnstile().then((api) => {
-    widget = api.render(container, { sitekey, callback: onToken, 'expired-callback': () => onToken('') })
+    widget = api.render(container, { sitekey, appearance: 'interaction-only', callback: onToken, 'expired-callback': () => onToken('') })
   })
   return () => {
     onToken('')

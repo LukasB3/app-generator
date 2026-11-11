@@ -161,11 +161,11 @@ describe('POST /api/jobs', () => {
     expect(store.costSince(0)).toBe(1235)
   })
 
-  it('turns away nonsense and abusive prompts without queueing or using up the hourly limit', async () => {
+  it('turns away nonsense, abusive prompts and personal data without queueing or using up the hourly limit', async () => {
     const screened: string[] = []
     await setup(gated, {}, async (prompt, jobId) => {
       screened.push(jobId)
-      return prompt.includes('qwrtz') ? 'nonsense' : prompt.includes('insult') ? 'abusive' : 'ok'
+      return prompt.includes('qwrtz') ? 'nonsense' : prompt.includes('insult') ? 'abusive' : prompt.includes('@') ? 'personal' : 'ok'
     })
     for (let i = 0; i < 3; i++) {
       const res = await submit('axchf qwrtz uaidhc')
@@ -175,6 +175,9 @@ describe('POST /api/jobs', () => {
     const abusive = await submit('a page full of insults')
     expect(abusive.statusCode).toBe(422)
     expect(abusive.json().error).toMatch(/against the rules/)
+    const personal = await submit('a birthday page for erika.mustermann@example.com')
+    expect(personal.statusCode).toBe(422)
+    expect(personal.json().error).toMatch(/contains personal data/)
     expect(store.countSince(0)).toBe(0)
 
     const built = await submit()
