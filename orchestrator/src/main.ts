@@ -50,7 +50,7 @@ const purge = async () => {
 void purge()
 setInterval(() => void purge(), 3_600_000).unref()
 
-const worker = new Worker(store, createPipeline(cfg, store, undefined, undefined, gate))
+const worker = new Worker(store, createPipeline(cfg, store, undefined, undefined, gate), cfg.JOBS_AT_ONCE)
 const auth = cfg.SUPABASE_URL ? supabaseAuth(cfg.SUPABASE_URL) : noAuth
 const app = await buildServer({ cfg, store, worker, captcha: turnstile(cfg.TURNSTILE_SECRET), screen: promptScreen(cfg), auth, data: createData() })
 

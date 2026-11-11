@@ -170,8 +170,12 @@ export class Store {
       .all(ownerId, now) as unknown as OwnedApp[]
   }
 
-  nextQueued() {
-    return this.db.prepare(`SELECT ${JOB_COLUMNS} FROM jobs WHERE status = 'queued' ORDER BY n LIMIT 1`).get() as unknown as Job | undefined
+  // The oldest job that waits, leaving out those a worker has already taken.
+  nextQueued(taken: Iterable<string> = []) {
+    const ids = [...taken]
+    return this.db
+      .prepare(`SELECT ${JOB_COLUMNS} FROM jobs WHERE status = 'queued' AND id NOT IN (${ids.map(() => '?').join(', ')}) ORDER BY n LIMIT 1`)
+      .get(...ids) as unknown as Job | undefined
   }
 
   // 0 once the job is being worked on; otherwise its 1-based place among queued jobs.
