@@ -165,8 +165,8 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
     const owned = JOB_ID.test(req.params.id) ? store.getApp(req.params.id) : undefined
     if (!owned || owned.ownerId !== userId || owned.expiresAt <= Date.now()) return refuse(reply, 404, 'Unknown app.')
     if (!owned.currentJobId) return refuse(reply, 409, 'This app cannot be changed: it has not been published yet, or it was built before changes were possible.')
-    // A change needs time to be built, and it never moves the end of the app.
-    if (owned.expiresAt - Date.now() < HOUR) return refuse(reply, 409, 'This app is removed within the hour, so it can no longer be changed.')
+    // A change needs time to be built, and it never moves the end of the app. The page offers a change on the same terms: more than an hour left.
+    if (owned.expiresAt - Date.now() <= HOUR) return refuse(reply, 409, 'This app is removed within the hour, so it can no longer be changed.')
     if (!(await captcha(parsed.data.captchaToken, req.ip))) return refuse(reply, 403, 'The captcha check failed. Please try again.')
     return submit(req, reply, parsed.data.prompt, userId, { appId: owned.id })
   })
