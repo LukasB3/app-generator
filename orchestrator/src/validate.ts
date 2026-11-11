@@ -244,7 +244,7 @@ const checkCss = (file: string, source: string, known: Set<string>, problems: st
 }
 
 const checkScript = (file: string, source: string, opts: ValidateOptions, problems: string[]) => {
-  if (opts.database && HTML_SINKS.test(source)) problems.push(`${file}: innerHTML, outerHTML, insertAdjacentHTML and document.write are not allowed in an app with a database, because its rows are written by strangers. Build elements with createElement and set their text with textContent`)
+  if (opts.database && HTML_SINKS.test(source)) problems.push(`${file}: innerHTML, outerHTML, insertAdjacentHTML and document.write are not allowed in an app with a database, because its rows are written by strangers. Build elements with createElement and set their text with textContent. For a QR code, draw on a canvas with qr.renderTo2dContext`)
   for (const match of source.matchAll(/(?:https?:|wss?:)\/\/[^\s'"`)<>]+/gi))
     if (!ALLOWED_ABSOLUTE.test(match[0])) {
       problems.push(`${file}: external URLs are not allowed in scripts`)
