@@ -19,9 +19,34 @@ export interface AgentRun {
   gateToken: string
   deadline: number
   onFile: (path: string) => void
+  // The agent asked the database gateway for a table or a column.
+  onDatabaseWish: () => void
 }
 
 const SAFE_PATH = /^[a-z0-9][a-z0-9._/-]{0,120}$/i
+const DATABASE_WISHES = new Set(['mcp__db__create_table', 'mcp__db__add_column'])
+
+// What one line of the agent's stream-json output says: how the run ended,
+// which files it wrote, and whether it asked the database gateway for anything.
+export const agentSteps = (line: string) => {
+  const steps: { outcome?: 'success' | 'error'; files: string[]; askedDatabase: boolean } = { files: [], askedDatabase: false }
+  let event: any
+  try {
+    event = JSON.parse(line)
+  } catch {
+    return steps
+  }
+  if (event?.type === 'result') steps.outcome = event.subtype === 'success' && !event.is_error ? 'success' : 'error'
+  if (event?.type !== 'assistant' || !Array.isArray(event.message?.content)) return steps
+  for (const block of event.message.content) {
+    if (block?.type !== 'tool_use') continue
+    if (DATABASE_WISHES.has(block.name)) steps.askedDatabase = true
+    if (!['Write', 'Edit'].includes(block.name)) continue
+    const path = String(block.input?.file_path ?? '').replace(/^\/workspace\//, '')
+    steps.files.push(SAFE_PATH.test(path) && !path.includes('..') ? path : '(file)')
+  }
+  return steps
+}
 
 // The request text is data. It reaches the agent on stdin, wrapped so the model
 // sees where it starts and ends, and never touches a command line.
@@ -63,19 +88,10 @@ export const runAgent = (cfg: Config, job: AgentRun) =>
     child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-2000)))
 
     createInterface({ input: child.stdout }).on('line', (line) => {
-      let event: any
-      try {
-        event = JSON.parse(line)
-      } catch {
-        return
-      }
-      if (event?.type === 'result') outcome = event.subtype === 'success' && !event.is_error ? 'success' : 'error'
-      if (event?.type !== 'assistant' || !Array.isArray(event.message?.content)) return
-      for (const block of event.message.content) {
-        if (block?.type !== 'tool_use' || !['Write', 'Edit'].includes(block.name)) continue
-        const path = String(block.input?.file_path ?? '').replace(/^\/workspace\//, '')
-        job.onFile(SAFE_PATH.test(path) && !path.includes('..') ? path : '(file)')
-      }
+      const steps = agentSteps(line)
+      outcome = steps.outcome ?? outcome
+      for (const file of steps.files) job.onFile(file)
+      if (steps.askedDatabase) job.onDatabaseWish()
     })
 
     child.on('error', (error) => {

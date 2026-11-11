@@ -154,7 +154,9 @@ const resolved = (file: string, ref: string) => {
   }
 }
 
-const checkHtml = (file: string, source: string, known: Set<string>, opts: ValidateOptions, problems: string[]) => {
+type Reach = 'database' | 'liveData'
+
+const checkHtml = (file: string, source: string, known: Set<string>, opts: ValidateOptions, problems: string[], uses: Set<Reach>) => {
   const doc = parse(source)
   let usesDatabase = false
   let usesLiveData = false
@@ -204,6 +206,8 @@ const checkHtml = (file: string, source: string, known: Set<string>, opts: Valid
   // Only a page that loads one of the two libraries is told where to ask, and may ask there.
   const database = usesDatabase ? opts.database : undefined
   const liveData = usesLiveData ? opts.liveData : undefined
+  if (database) uses.add('database')
+  if (liveData) uses.add('liveData')
   const reachable = [database && `${database.url}/rest/v1/`, liveData].filter(Boolean)
   head.childNodes.unshift(
     element('meta', { 'http-equiv': 'Content-Security-Policy', content: reachable.length ? policy(reachable.join(' ')) : CSP }, head),
@@ -277,13 +281,15 @@ export const validateWorkspace = async (root: string, opts: ValidateOptions) => 
 
   const known = new Set([...sources.keys(), ...[...opts.libs.keys()].map((name) => `lib/${name}`)])
   const out = new Map<string, Buffer>()
+  // What the app's pages were allowed to reach beyond their own folder.
+  const uses = new Set<Reach>()
   for (const [path, text] of sources) {
     for (const [label, pattern] of SECRETS) if (pattern.test(text)) problems.push(`${path}: contains what looks like ${label}`)
     for (const secret of opts.extraSecrets ?? []) if (secret && text.includes(secret)) problems.push(`${path}: contains a server secret`)
 
     const ext = path.split('.').pop()!.toLowerCase()
     let result = text
-    if (ext === 'html') result = checkHtml(path, text, known, opts, problems) ?? text
+    if (ext === 'html') result = checkHtml(path, text, known, opts, problems, uses) ?? text
     if (ext === 'css') checkCss(path, text, known, problems)
     if (ext === 'js') checkScript(path, text, opts, problems)
     if (ext === 'json')
@@ -300,5 +306,5 @@ export const validateWorkspace = async (root: string, opts: ValidateOptions) => 
   // the ones the app actually references.
   const referenced = [...sources.values()].join('\n')
   for (const [name, bytes] of opts.libs) if (referenced.includes(`lib/${name}`)) out.set(`lib/${name}`, bytes)
-  return { files: out, sources }
+  return { files: out, sources, uses }
 }

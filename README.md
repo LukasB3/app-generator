@@ -26,7 +26,7 @@ flowchart LR
 ```
 
 1. The website sends the prompt and a Turnstile token to the orchestrator.
-2. The orchestrator applies the limits and has a small model screen the prompt: gibberish, abusive requests and requests that carry personal data are turned away with a message before anything is queued. Then it queues the job and streams progress back (`queued → preparing → coding → checking → publishing → done`), including the files the agent writes.
+2. The orchestrator applies the limits and has a small model screen the prompt: gibberish, abusive requests and requests that carry personal data are turned away with a message before anything is queued. Then it queues the job and streams progress back (`queued → preparing → coding → checking → publishing → done`), including the files the agent writes and a note when a database is asked for or set up, or live data is allowed.
 3. For each job a fresh container starts with a workspace that holds only the bundled libraries. The agent has the Read, Write, Edit, Glob and Grep tools, and three tools of the database gateway with which it can ask for tables for the app. Asking changes nothing: the gateway checks the wish and writes it down.
 4. When the agent stops, the checker validates the workspace. If it finds problems, the agent gets one repair round with the findings. Only after the app has passed are the tables it asked for created, all at once.
 5. The publisher commits the checked files to `apps/<app-id>/` in a dedicated repository and waits until GitHub Pages serves them.

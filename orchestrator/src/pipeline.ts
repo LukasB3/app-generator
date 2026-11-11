@@ -65,7 +65,11 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
       // A change starts from the files that passed the checker last time. They get no trust for that: the whole app is checked again.
       if (edit && !(await seedWorkspace(cfg, job.appId, workspace))) throw new AppGone()
 
-      const agent = (problems?: string[]) => run(cfg, { jobId: job.id, request: job.prompt, edit, problems, token, gateToken, deadline, onFile: report.file })
+      // A line for the visitor, said once however often it happens.
+      const said = new Set<string>()
+      const once = (text: string) => void (said.has(text) || (said.add(text), report.note(text)))
+      const agent = (problems?: string[]) =>
+        run(cfg, { jobId: job.id, request: job.prompt, edit, problems, token, gateToken, deadline, onFile: report.file, onDatabaseWish: () => once('Database requested through an MCP tool') })
       const check = async () => {
         // The agent cannot touch the database. It can ask the gateway for
         // tables, and the gateway writes that down. A gateway that cannot be
@@ -90,7 +94,7 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
       await agent()
 
       report.status('checking')
-      const { files, sources, changes } = await check().catch(async (error: unknown) => {
+      const { files, sources, uses, changes } = await check().catch(async (error: unknown) => {
         if (!(error instanceof ValidationError)) throw error
         // One repair round: the checker's findings go back to the agent.
         report.note('The checker found problems, asking the agent to fix them')
@@ -106,7 +110,9 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
       if (changes.length) {
         await gate.commit(job.appId, changes)
         apps.setHasDb(job.appId)
+        report.note('Database set up after the check passed')
       }
+      if (uses.has('liveData')) report.note('Live data allowed: weather and exchange rates')
 
       report.status('publishing')
       return await publish(job.appId, job.id, files, {

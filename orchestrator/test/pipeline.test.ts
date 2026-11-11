@@ -31,7 +31,8 @@ const publish = async (appId: string, jobId: string, files: Map<string, Buffer>,
   await hooks.pushed()
   return `https://apps.example/apps/${appId}/`
 }
-const report: Reporter = { status: () => {}, file: () => {}, note: () => {}, cost: () => {} }
+let notes: string[]
+const report: Reporter = { status: () => {}, file: () => {}, note: (text) => void notes.push(text), cost: () => {} }
 const build = (jobId: string) => createPipeline(cfg, store, run, publish)(store.getJob(jobId)!, report)
 const stored = (appId: string, file: string) => join(cfg.DATA_DIR, 'sources', appId, file)
 
@@ -51,6 +52,7 @@ beforeEach(() => {
   store = new Store(':memory:')
   runs = []
   published = []
+  notes = []
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -102,7 +104,9 @@ describe('building and changing an app', () => {
 
     cfg = { ...cfg, API_ORIGIN: 'https://api.app-generator.example' }
     store.createJob({ id: 'app2', prompt: 'the weather', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
+    notes = []
     await build('app2')
+    expect(notes).toEqual(['Live data allowed: weather and exchange rates'])
     expect(published[0]!.html).toContain('connect-src https://api.app-generator.example/api/data/;')
     expect(published[0]!.html).toContain('<meta name="app-generator-data" content="https://api.app-generator.example/api/data/">')
   })
@@ -194,10 +198,14 @@ describe('apps with tables', () => {
     agent = (workspace, job) => {
       expect(job.gateToken).toBe('agd1.app1.app1.pass')
       asked = [table]
+      // Asking twice is told once.
+      job.onDatabaseWish()
+      job.onDatabaseWish()
       guestbook(workspace)
     }
     await buildWith('app1')
     expect(log).toEqual(['plan app1', 'commit app1 create_table', 'publish'])
+    expect(notes).toEqual(['Database requested through an MCP tool', 'Database set up after the check passed'])
     expect(store.getApp('app1')!.hasDb).toBe(1)
     const html = published[0]!.html
     expect(html).toContain('connect-src https://project.example/rest/v1/')
