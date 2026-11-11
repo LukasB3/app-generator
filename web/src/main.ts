@@ -20,6 +20,7 @@ interface JobState {
 interface Progress {
   seq: number
   ts: number
+  // 'file' names a file the agent wrote. The page does not list those.
   type: 'status' | 'file' | 'note'
   data: string
 }
@@ -33,7 +34,6 @@ const formError = $('form-error')
 const board = $('job')
 const result = $('result')
 const resultLink = $<HTMLAnchorElement>('result-link')
-const fileList = $('files')
 // The steps stand in the page, in the order every request takes them. The
 // first has no job status: the server screens a request before it makes a job.
 const stages = [...document.querySelectorAll<HTMLLIElement>('#stages > li')]
@@ -94,6 +94,15 @@ const stopClock = () => {
 
 // How long the app stays online from now, measured on the server's clock.
 const lifetime = (job: JobState) => (job.expiresAt ? `It stays online for ${timeLeft(job.expiresAt, job.now ?? Date.now())}.` : '')
+
+// What the server says a build did, in its own words, under the step it happened in.
+const addNote = (step: number, text: string) => {
+  const node = stages[step]
+  if (!node) return
+  const list = node.querySelector('.notes') ?? node.appendChild(el('ul', '', 'notes'))
+  list.append(el('li', text))
+}
+const clearNotes = () => document.querySelectorAll('#stages .notes').forEach((list) => list.remove())
 
 // Marks the steps: those before `at` are over. The one at `at` runs, is where
 // things stopped, or is still ahead while the job waits for its turn.
@@ -160,6 +169,8 @@ const watch = (id: string) => {
   busy = true
   refreshSubmit()
   let lastSeq = 0
+  // The step the stream has reached, which after a reload runs behind the job's state.
+  let step = 0
   source = new EventSource(`${API}/api/jobs/${id}/events`)
   source.addEventListener('state', (event) => render(JSON.parse((event as MessageEvent).data)))
   source.addEventListener('progress', (event) => {
@@ -167,15 +178,13 @@ const watch = (id: string) => {
     if (progress.seq <= lastSeq) return
     lastSeq = progress.seq
     if (progress.type === 'status') {
+      step = Math.max(0, ORDER.indexOf(progress.data))
       // The server's start time keeps the clock right after a reload.
       if (progress.data === 'preparing') {
         startedAt = Math.min(Date.now(), progress.ts + clockAhead)
         if (clock !== undefined) tick()
       }
-      return
-    }
-    fileList.append(el('li', progress.data, progress.type))
-    fileList.scrollTop = fileList.scrollHeight
+    } else if (progress.type === 'note') addNote(step, progress.data)
   })
   source.onerror = async () => {
     // The browser retries by itself; only give up if the job is gone.
@@ -191,7 +200,7 @@ const reset = () => {
   finished = false
   lastStage = 'queued'
   history.replaceState(null, '', location.pathname)
-  fileList.replaceChildren()
+  clearNotes()
   result.hidden = true
   showSteps(-1, 'ahead')
   setStatus('idle', IDLE_TITLE)
@@ -222,7 +231,7 @@ form.addEventListener('submit', async (event) => {
     return showFormError('Your login has run out. Log in again under "My apps", or send the request once more to build without an account.')
   }
   // The server screens the request before it answers, so the first step runs while this waits.
-  fileList.replaceChildren()
+  clearNotes()
   result.hidden = true
   showSteps(0, 'now')
   setStatus('screening', 'Screening your request')
@@ -258,7 +267,7 @@ prompt.addEventListener('input', refreshSubmit)
 
 document.querySelectorAll<HTMLButtonElement>('.examples button').forEach((button) =>
   button.addEventListener('click', () => {
-    prompt.value = button.textContent ?? ''
+    prompt.value = button.dataset.prompt ?? ''
     prompt.dispatchEvent(new Event('input'))
     prompt.focus()
   }),
