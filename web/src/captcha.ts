@@ -11,12 +11,21 @@ const turnstile = () =>
 
 // Puts a widget into `container`. It shows itself only when the visitor has
 // to do something. `onToken` gets each solved token, and an empty string when
-// one expires. Returns a function that asks for a fresh token, since each one
+// one expires. While it asks the visitor for a click the container has the
+// class `asks`. Returns a function that asks for a fresh token, since each one
 // works only once.
 export const mountCaptcha = (container: string, sitekey: string, onToken: (token: string) => void) => {
   let widget: string | undefined
+  const asks = (now: boolean) => () => document.querySelector(container)?.classList.toggle('asks', now)
   void turnstile().then((api) => {
-    widget = api.render(container, { sitekey, appearance: 'interaction-only', callback: onToken, 'expired-callback': () => onToken('') })
+    widget = api.render(container, {
+      sitekey,
+      appearance: 'interaction-only',
+      callback: onToken,
+      'expired-callback': () => onToken(''),
+      'before-interactive-callback': asks(true),
+      'after-interactive-callback': asks(false),
+    })
   })
   return () => {
     onToken('')

@@ -48,8 +48,8 @@ let startedAt = 0
 let clockAhead = 0
 let busy = false
 let finished = false
-// The visitor asked for a build before the captcha had answered. It is sent as soon as it has.
-let sendWhenChecked = false
+// Set while a build the visitor asked for waits for the captcha's answer.
+let tokenArrived: (() => void) | undefined
 
 const el = (tag: string, text = '', className = '') => {
   const node = document.createElement(tag)
@@ -69,16 +69,21 @@ const setStatus = (state: 'idle' | 'screening' | 'waiting' | 'building' | 'done'
 }
 
 const refreshSubmit = () => {
-  submit.disabled = !finished && (busy || sendWhenChecked)
+  submit.disabled = busy && !finished
   submit.textContent = finished ? 'Build another app' : busy ? 'Building…' : 'Build my app'
-  // The captcha stays out of sight unless it needs the visitor, so say what the button waits for.
-  $('hint').textContent = sendWhenChecked ? 'Checking that you are not a bot…' : ''
   $('count').textContent = prompt.value.length >= 800 ? `${prompt.value.length} / ${prompt.maxLength}` : ''
 }
+
+// The page moves by itself once per build: to the steps, at the click. On a
+// phone they then fill the screen, and nothing above them changes height
+// while a build runs, so they stay where they are.
+const showBoard = () => board.scrollIntoView({ behavior: 'smooth', block: narrow.matches ? 'start' : 'nearest' })
 
 const showFormError = (message = '') => {
   formError.hidden = !message
   formError.textContent = message
+  // A refusal that belongs to the form brings the form back.
+  if (message) form.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
 const stopWatching = () => {
@@ -138,7 +143,8 @@ const render = (job: JobState) => {
     resultLink.dataset.address = job.url
     const wasHidden = result.hidden
     result.hidden = false
-    if (wasHidden && narrow.matches) resultLink.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // Only a visitor who scrolled away in the meantime is brought back to the link.
+    if (wasHidden && narrow.matches) showBoard()
   }
   if (job.status === 'failed') result.hidden = true
   if (job.status === 'done' || job.status === 'failed') {
@@ -216,27 +222,32 @@ form.addEventListener('submit', async (event) => {
     prompt.focus()
     return showFormError('Describe the app you want in a few words first.')
   }
-  // On a phone the steps sit below the fold, so the page goes there at once.
-  if (narrow.matches) board.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  if (!captchaToken) {
-    sendWhenChecked = true
-    return refreshSubmit()
-  }
   busy = true
   refreshSubmit()
+  clearNotes()
+  result.hidden = true
+  // Screening is both gates, so the first step runs from the click: Cloudflare's
+  // check in the browser, then the server, which screens before it answers.
+  const checked = captchaToken !== ''
+  showSteps(0, 'now')
+  setStatus('screening', checked ? 'Screening your request' : 'Checking that you are not a bot')
+  // The field would keep a phone's keyboard open over the steps.
+  if (narrow.matches) prompt.blur()
+  showBoard()
+  const backToForm = (message: string) => {
+    busy = false
+    refreshSubmit()
+    showSteps(-1, 'ahead')
+    setStatus('idle', IDLE_TITLE)
+    showFormError(message)
+  }
   // A login that has run out must not turn into an anonymous app without a word.
   const wasLoggedIn = hasLogin()
   const login = await authHeader().catch(() => ({}))
-  if (wasLoggedIn && !('authorization' in login)) {
-    busy = false
-    refreshSubmit()
-    return showFormError('Your login has run out. Log in again under "My apps", or send the request once more to build without an account.')
-  }
-  // The server screens the request before it answers, so the first step runs while this waits.
-  clearNotes()
-  result.hidden = true
-  showSteps(0, 'now')
-  setStatus('screening', 'Screening your request')
+  if (wasLoggedIn && !('authorization' in login))
+    return backToForm('Your login has run out. Log in again under "My apps", or send the request once more to build without an account.')
+  if (!captchaToken) await new Promise<void>((resolve) => (tokenArrived = resolve))
+  if (!checked) setStatus('screening', 'Screening your request')
   const res = await fetch(`${API}/api/jobs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...login },
@@ -245,24 +256,19 @@ form.addEventListener('submit', async (event) => {
   resetCaptcha()
 
   const body = await res?.json().catch(() => null)
-  const showBoard = () => board.scrollIntoView({ behavior: 'smooth', block: narrow.matches ? 'start' : 'nearest' })
-  if (!res?.ok || !body?.id) {
+  if (res?.ok && body?.id) {
+    history.replaceState(null, '', `#job=${body.id}`)
+    render(body)
+    return watch(body.id)
+  }
+  // 422 is the screen's own answer, so it is shown where the screen stands.
+  if (res?.status === 422 && body?.error) {
     busy = false
     refreshSubmit()
-    // 422 is the screen's own answer, so it is shown where the screen stands.
-    if (res?.status === 422 && body?.error) {
-      showSteps(0, 'stopped')
-      setStatus('failed', 'This request was turned away.', body.error)
-      return showBoard()
-    }
-    showSteps(-1, 'ahead')
-    setStatus('idle', IDLE_TITLE)
-    return showFormError(body?.error ?? 'The app generator could not be reached. Check your connection and try again.')
+    showSteps(0, 'stopped')
+    return setStatus('failed', 'This request was turned away.', body.error)
   }
-  history.replaceState(null, '', `#job=${body.id}`)
-  render(body)
-  showBoard()
-  watch(body.id)
+  backToForm(body?.error ?? 'The app generator could not be reached. Check your connection and try again.')
 })
 
 prompt.addEventListener('input', refreshSubmit)
@@ -281,12 +287,11 @@ $('copy').addEventListener('click', async () => {
   window.setTimeout(() => ($('copy').textContent = 'Copy link'), 2000)
 })
 
-const resetCaptcha = mountCaptcha('#captcha', SITE_KEY, (token) => {
+const resetCaptcha = mountCaptcha('#bot-check', SITE_KEY, (token) => {
   captchaToken = token
-  const send = sendWhenChecked && token !== ''
-  if (send) sendWhenChecked = false
-  refreshSubmit()
-  if (send) form.requestSubmit()
+  if (!token) return
+  tokenArrived?.()
+  tokenArrived = undefined
 })
 
 // Logged in, an app stays for ten days and can be changed, and the line under the form says so.
