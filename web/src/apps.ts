@@ -122,7 +122,7 @@ const start = async () => {
       })
       return
     }
-    $('who').textContent = address
+    $('address').textContent = address
 
     const token = await session.accessToken()
     const res = await fetch(`${API}/api/apps`, { headers: { authorization: `Bearer ${token}` } }).catch(() => null)
@@ -202,10 +202,9 @@ const start = async () => {
     location.assign(`./#job=${body.id}`)
   })
 
-  $('logout').addEventListener('click', () => {
-    confirm.hidden = true
-    ask.hidden = false
-    void session.logout()
+  $('logout').addEventListener('click', async () => {
+    await session.logout().catch(() => null)
+    location.assign('./')
   })
 
   // The link in the login mail leads here with a token that works once.
