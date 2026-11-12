@@ -65,7 +65,6 @@ const setStatus = (state: 'idle' | 'screening' | 'waiting' | 'building' | 'done'
   $('status-title').textContent = title
   $('status-note').textContent = note
   $('status-note').hidden = !note
-  $('clock').hidden = state !== 'building'
 }
 
 const refreshSubmit = () => {
@@ -91,10 +90,39 @@ const stopWatching = () => {
   source = undefined
 }
 
+// The clock counts from the click to the end of the build, through screening
+// and any wait in line. Runs independently of the event stream, so
+// reconnecting never stops it.
+const tick = () => {
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+  $('clock').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+const startClock = () => {
+  if (clock !== undefined) return
+  startedAt = Date.now()
+  tick()
+  clock = window.setInterval(tick, 1000)
+  $('clock').hidden = false
+}
+
 const stopClock = () => {
   window.clearInterval(clock)
   clock = undefined
-  startedAt = 0
+  $('clock').hidden = true
+}
+
+// The server prepares a build faster than anyone can read, so the page keeps
+// Preparing lit for a second before it shows what came after.
+const PREPARING_SHOWN_MS = 1000
+let preparingSince = 0
+let held: JobState | undefined
+let release: number | undefined
+
+const forgetHold = () => {
+  window.clearTimeout(release)
+  release = held = undefined
+  preparingSince = 0
 }
 
 // How long the app stays online from now, measured on the server's clock.
@@ -126,16 +154,19 @@ const showSteps = (at: number, there: 'now' | 'stopped' | 'ahead' | 'over') => {
 // "failed" is not a step: the job stops wherever it was. A queued job has
 // passed the screen and waits in front of the next step.
 let lastStage: Status = 'queued'
-const render = (job: JobState) => {
-  if (job.now) clockAhead = Date.now() - job.now
+const show = (job: JobState) => {
   if (job.status !== 'failed') lastStage = job.status
+  if (job.status === 'preparing') preparingSince ||= Date.now()
   const waiting = lastStage === 'queued'
   showSteps(waiting ? 1 : ORDER.indexOf(lastStage), job.status === 'done' ? 'over' : job.status === 'failed' ? 'stopped' : waiting ? 'ahead' : 'now')
 
   if (job.status === 'queued') setStatus('waiting', job.position <= 1 ? 'You are next in line.' : `Place ${job.position} in line.`, 'Two apps are built at a time. Yours starts when one of them is finished.')
   else if (job.status === 'done') setStatus('done', 'Your app is live.', lifetime(job))
   else if (job.status === 'failed') setStatus('failed', 'The build failed.', job.error ?? 'This app could not be built.')
-  else startClock()
+  // The server repeats a state whenever the line moves. The words are set once, so a screen reader says them once.
+  else if (board.dataset.state !== 'building') setStatus('building', 'Building your app', 'Most apps take under two minutes. You can leave this page open.')
+  // A page loaded in the middle of a build starts its clock here.
+  if (job.status !== 'done' && job.status !== 'failed') startClock()
 
   if (job.status === 'done' && job.url) {
     // A changed app keeps its address. Naming the build makes the browser fetch it instead of a copy it has kept.
@@ -148,7 +179,6 @@ const render = (job: JobState) => {
   }
   if (job.status === 'failed') result.hidden = true
   if (job.status === 'done' || job.status === 'failed') {
-    stopWatching()
     stopClock()
     busy = false
     finished = job.status === 'done'
@@ -156,18 +186,17 @@ const render = (job: JobState) => {
   }
 }
 
-// Runs independently of the event stream, so reconnecting never stops it.
-const tick = () => {
-  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-  $('clock').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
-
-const startClock = () => {
-  if (clock !== undefined) return
-  startedAt ||= Date.now()
-  setStatus('building', 'Building your app', 'Most apps take under two minutes. You can leave this page open.')
-  tick()
-  clock = window.setInterval(tick, 1000)
+const render = (job: JobState) => {
+  if (job.now) clockAhead = Date.now() - job.now
+  // Nothing follows the last state, also while the page is not showing it yet.
+  if (job.status === 'done' || job.status === 'failed') stopWatching()
+  const wait = preparingSince + PREPARING_SHOWN_MS - Date.now()
+  if (job.status === 'preparing' || wait <= 0) return show(job)
+  held = job
+  release ??= window.setTimeout(() => {
+    release = undefined
+    show(held!)
+  }, wait)
 }
 
 const watch = (id: string) => {
@@ -185,10 +214,11 @@ const watch = (id: string) => {
     lastSeq = progress.seq
     if (progress.type === 'status') {
       step = Math.max(0, ORDER.indexOf(progress.data))
-      // The server's start time keeps the clock right after a reload.
-      if (progress.data === 'preparing') {
-        startedAt = Math.min(Date.now(), progress.ts + clockAhead)
-        if (clock !== undefined) tick()
+      // A reloaded page has forgotten the click. The job's first event is the
+      // nearest the server knows; a click on this page is earlier and stays.
+      if (progress.data === 'queued' && clock !== undefined) {
+        startedAt = Math.min(startedAt, progress.ts + clockAhead)
+        tick()
       }
     } else if (progress.type === 'note') addNote(step, progress.data)
   })
@@ -202,6 +232,7 @@ const watch = (id: string) => {
 const reset = () => {
   stopWatching()
   stopClock()
+  forgetHold()
   busy = false
   finished = false
   lastStage = 'queued'
@@ -225,7 +256,9 @@ form.addEventListener('submit', async (event) => {
   busy = true
   refreshSubmit()
   clearNotes()
+  forgetHold()
   result.hidden = true
+  startClock()
   // Screening is both gates, so the first step runs from the click: Cloudflare's
   // check in the browser, then the server, which screens before it answers.
   captcha.wake()
@@ -237,6 +270,7 @@ form.addEventListener('submit', async (event) => {
   showBoard()
   const backToForm = (message: string) => {
     busy = false
+    stopClock()
     refreshSubmit()
     showSteps(-1, 'ahead')
     setStatus('idle', IDLE_TITLE)
@@ -268,6 +302,7 @@ form.addEventListener('submit', async (event) => {
   // 422 is the screen's own answer, so it is shown where the screen stands.
   if (res?.status === 422 && body?.error) {
     busy = false
+    stopClock()
     refreshSubmit()
     showSteps(0, 'stopped')
     return setStatus('failed', 'This request was turned away.', body.error)
