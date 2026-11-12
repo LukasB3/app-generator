@@ -202,6 +202,7 @@ main.start {
 #order {
   max-width: 46rem;
   margin-top: clamp(1.5rem, 4vh, 2.25rem);
+  scroll-margin-top: 1rem;
 }
 
 textarea,
@@ -229,6 +230,7 @@ textarea::placeholder {
 /* One field: the text, and under it what you can do with it */
 
 .composer {
+  margin-bottom: 0.625rem;
   border: 1.5px solid var(--ink);
   border-radius: 0.875rem;
   background: var(--paper);
@@ -284,13 +286,11 @@ textarea::placeholder {
   color: var(--ink);
 }
 
-#count:empty,
-#hint:empty {
+#count:empty {
   display: none;
 }
 
-#count,
-#hint {
+#count {
   flex: none;
   color: var(--ink-soft);
   font-size: 0.875rem;
@@ -397,6 +397,7 @@ textarea::placeholder {
   margin: 0;
   font: 500 clamp(1.5rem, 2.5vw, 1.875rem) / 1.15 var(--display);
   letter-spacing: -0.012em;
+  text-wrap: balance;
 }
 
 .status-note {
@@ -404,6 +405,11 @@ textarea::placeholder {
   margin: 0.375rem 0 0;
   color: var(--board-soft);
   font-size: 1rem;
+}
+
+/* Cloudflare's widget takes room only while it wants a click from the visitor. */
+#bot-check.asks {
+  margin-top: 1rem;
 }
 
 .board[data-state='done'] .status-title {
@@ -1016,6 +1022,11 @@ footer nav {
     grid-column: 1 / -1;
   }
 
+  /* A build scrolls the steps to the top of the screen. Only a board this tall can get there. */
+  .board {
+    min-height: 100vh;
+  }
+
   .stages {
     --gap: 1.75rem;
     --draw-from: 1 0;
@@ -1097,8 +1108,7 @@ footer nav {
     padding: 0.5rem 0.75rem 0.75rem;
   }
 
-  #count,
-  #hint {
+  #count {
     align-self: flex-end;
   }
 
