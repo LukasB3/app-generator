@@ -100,7 +100,7 @@ const start = async () => {
     resetChangeCaptcha ??= mountCaptcha('#change-captcha', BUILD_SITE_KEY, (token) => {
       changeToken = token
       refresh()
-    })
+    }).renew
     wish.focus()
   }
   const closeChange = () => {
@@ -119,7 +119,7 @@ const start = async () => {
       resetCaptcha ??= mountCaptcha('#captcha', LOGIN_SITE_KEY, (token) => {
         captchaToken = token
         refresh()
-      })
+      }).renew
       return
     }
     $('address').textContent = address

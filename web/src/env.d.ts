@@ -21,6 +21,7 @@ interface Turnstile {
     },
   ): string
   reset(widget?: string): void
+  remove(widget: string): void
 }
 
 interface Window {

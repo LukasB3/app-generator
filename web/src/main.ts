@@ -228,6 +228,7 @@ form.addEventListener('submit', async (event) => {
   result.hidden = true
   // Screening is both gates, so the first step runs from the click: Cloudflare's
   // check in the browser, then the server, which screens before it answers.
+  captcha.wake()
   const checked = captchaToken !== ''
   showSteps(0, 'now')
   setStatus('screening', checked ? 'Screening your request' : 'Checking that you are not a bot')
@@ -253,7 +254,10 @@ form.addEventListener('submit', async (event) => {
     headers: { 'content-type': 'application/json', ...login },
     body: JSON.stringify({ prompt: prompt.value, captchaToken }),
   }).catch(() => null)
-  resetCaptcha()
+  // The token is spent. The next one is fetched at the next click, not now:
+  // a check that wanted the visitor's click in the middle of a build would
+  // look like a second screening.
+  captcha.rest()
 
   const body = await res?.json().catch(() => null)
   if (res?.ok && body?.id) {
@@ -287,7 +291,7 @@ $('copy').addEventListener('click', async () => {
   window.setTimeout(() => ($('copy').textContent = 'Copy link'), 2000)
 })
 
-const resetCaptcha = mountCaptcha('#bot-check', SITE_KEY, (token) => {
+const captcha = mountCaptcha('#bot-check', SITE_KEY, (token) => {
   captchaToken = token
   if (!token) return
   tokenArrived?.()
@@ -303,5 +307,7 @@ void account.then((address) => {
 const resumed = /^#job=([a-z2-7]{20})$/.exec(location.hash)?.[1]
 if (resumed) {
   board.classList.remove('intro')
+  // A build is running, so the check that every page load starts is called off.
+  captcha.rest()
   watch(resumed)
 }

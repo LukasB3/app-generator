@@ -12,12 +12,14 @@ const turnstile = () =>
 // Puts a widget into `container`. It shows itself only when the visitor has
 // to do something. `onToken` gets each solved token, and an empty string when
 // one expires. While it asks the visitor for a click the container has the
-// class `asks`. Returns a function that asks for a fresh token, since each one
-// works only once.
+// class `asks`.
 export const mountCaptcha = (container: string, sitekey: string, onToken: (token: string) => void) => {
   let widget: string | undefined
+  let resting = false
   const asks = (now: boolean) => () => document.querySelector(container)?.classList.toggle('asks', now)
-  void turnstile().then((api) => {
+  const show = async () => {
+    const api = await turnstile()
+    if (resting || widget) return
     widget = api.render(container, {
       sitekey,
       appearance: 'interaction-only',
@@ -26,9 +28,26 @@ export const mountCaptcha = (container: string, sitekey: string, onToken: (token
       'before-interactive-callback': asks(true),
       'after-interactive-callback': asks(false),
     })
-  })
-  return () => {
-    onToken('')
-    window.turnstile?.reset(widget)
+  }
+  void show()
+  return {
+    // Asks for a fresh token, since each one works only once.
+    renew: () => {
+      onToken('')
+      window.turnstile?.reset(widget)
+    },
+    // Takes the widget away. Until `wake` no check runs and nothing asks the visitor for a click.
+    rest: () => {
+      resting = true
+      onToken('')
+      asks(false)()
+      if (widget) window.turnstile?.remove(widget)
+      widget = undefined
+    },
+    // Puts the widget back after `rest`, which starts a check. Does nothing while one is there.
+    wake: () => {
+      resting = false
+      void show()
+    },
   }
 }
