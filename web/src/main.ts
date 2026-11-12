@@ -216,6 +216,8 @@ form.addEventListener('submit', async (event) => {
     prompt.focus()
     return showFormError('Describe the app you want in a few words first.')
   }
+  // On a phone the steps sit below the fold, so the page goes there at once.
+  if (narrow.matches) board.scrollIntoView({ behavior: 'smooth', block: 'start' })
   if (!captchaToken) {
     sendWhenChecked = true
     return refreshSubmit()
