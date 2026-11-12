@@ -88,7 +88,7 @@ a {
   flex: none;
   width: 1.5rem;
   height: 1.5rem;
-  background: url('/favicon.svg') center / 100% no-repeat;
+  background: url('./favicon.svg') center / 100% no-repeat;
 }
 
 .bar nav {
