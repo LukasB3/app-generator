@@ -2,10 +2,12 @@
 # Root-owned launcher for job containers. The orchestrator may run this through
 # sudo and nothing else, so the web-facing process never touches the Docker
 # socket. It accepts an action and a job id; every other detail of the
-# container is fixed here and in the root-owned config file.
+# containers is fixed here and in the root-owned config file.
 #
-#   ag-sandbox run <job-id>    stdin: the job token, then the job's token for
-#                              the database tools or "-", then the prompt
+#   ag-sandbox run <job-id>     stdin: the job token, then the job's token for
+#                               the database tools or "-", then the prompt
+#   ag-sandbox render <job-id>  stdin: the checked app as one JSON document;
+#                               stdout: what a browser made of it
 #   ag-sandbox kill <job-id>
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -23,7 +25,7 @@ die() {
   exit 64
 }
 
-[[ $# -eq 2 ]] || die "usage: ag-sandbox run|kill <job-id>"
+[[ $# -eq 2 ]] || die "usage: ag-sandbox run|render|kill <job-id>"
 action=$1
 id=$2
 [[ $id =~ ^[a-z2-7]{20}$ ]] || die "invalid job id"
@@ -34,6 +36,26 @@ source "$conf"
 case $action in
 kill)
   "$docker" kill "ag-job-$id" >/dev/null 2>&1 || true
+  "$docker" kill "ag-render-$id" >/dev/null 2>&1 || true
+  ;;
+render)
+  # The browser that opens a checked app. It is handed nothing but the app:
+  # no token, no network, no mount, and a user that owns nothing on the host.
+  exec "$docker" run --rm -i \
+    --name "ag-render-$id" \
+    --network none \
+    --runtime "$RENDER_RUNTIME" \
+    --user 65534:65534 \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --pids-limit "$RENDER_PIDS" \
+    --memory "$RENDER_MEMORY" \
+    --memory-swap "$RENDER_MEMORY" \
+    --cpus "$RENDER_CPUS" \
+    --tmpfs "/tmp:rw,nosuid,nodev,size=256m,uid=65534,gid=65534" \
+    --env HOME=/tmp \
+    "$RENDER_IMAGE"
   ;;
 run)
   IFS= read -r token || die "missing token"

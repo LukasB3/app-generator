@@ -1,0 +1,4 @@
+body { margin: 0; background: #ffffff; color: #111111; font: 16px/1.5 system-ui, sans-serif; }
+main { padding: 20px; }
+/* A block of one known colour at a known place, for the test of the picture. */
+.swatch { position: absolute; left: 20px; top: 300px; width: 100px; height: 100px; background: #ff0000; }

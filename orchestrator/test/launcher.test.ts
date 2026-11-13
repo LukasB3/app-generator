@@ -20,11 +20,11 @@ const out = (name: string) => readFileSync(join(dir, name), 'utf8')
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ag-launcher-'))
   mkdirSync(join(dir, 'jobs', ID), { recursive: true })
-  writeFileSync(join(dir, 'docker'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${dir}/args"\nprintf '%s' "$ANTHROPIC_API_KEY" > "${dir}/key"\nprintf '%s' "$AG_DB_TOKEN" > "${dir}/dbkey"\ncat > "${dir}/stdin"\n`)
+  writeFileSync(join(dir, 'docker'), `#!/bin/sh\nprintf '%s\\n' "$@" >> "${dir}/args"\nprintf '%s' "$ANTHROPIC_API_KEY" > "${dir}/key"\nprintf '%s' "$AG_DB_TOKEN" > "${dir}/dbkey"\ncat > "${dir}/stdin"\n`)
   chmodSync(join(dir, 'docker'), 0o755)
   writeFileSync(
     join(dir, 'sandbox.conf'),
-    `IMAGE=ag-sandbox:latest\nNETWORK=ag-sandbox\nRUNTIME=runc\nMEMORY=1g\nCPUS=1.5\nPIDS=256\nPROXY_URL=http://ag-proxy:8080\nMODEL=claude-sonnet-5-5\nJOBS_DIR=${dir}/jobs\nRUN_AS=${userInfo().username}\n`,
+    `IMAGE=ag-sandbox:latest\nNETWORK=ag-sandbox\nRUNTIME=runc\nMEMORY=1g\nCPUS=1.5\nPIDS=256\nPROXY_URL=http://ag-proxy:8080\nMODEL=claude-sonnet-5-5\nJOBS_DIR=${dir}/jobs\nRUN_AS=${userInfo().username}\nRENDER_IMAGE=ag-render:latest\nRENDER_RUNTIME=runsc\nRENDER_MEMORY=768m\nRENDER_CPUS=1\nRENDER_PIDS=256\n`,
   )
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -103,9 +103,33 @@ describe('ag-sandbox run', () => {
   })
 })
 
+describe('ag-sandbox render', () => {
+  it('starts the browser with no network, no mount and no token, and hands it the app on stdin', () => {
+    const result = launch(['render', ID], '{"base":"https://apps.example/"}')
+    expect(result.status).toBe(0)
+    const args = out('args').split('\n').join(' ')
+    for (const flag of [`--name ag-render-${ID}`, '--network none', '--runtime runsc', '--user 65534:65534', '--read-only', '--cap-drop ALL', '--security-opt no-new-privileges', '--pids-limit 256', '--memory 768m', '--cpus 1', '--rm'])
+      expect(args).toContain(flag)
+    expect(args).not.toMatch(/--mount|--volume|-v |ANTHROPIC|AG_DB_TOKEN|privileged|docker\.sock|ag-sandbox/)
+    expect(args.trim().endsWith('ag-render:latest')).toBe(true)
+    expect(out('key')).toBe('')
+    expect(out('dbkey')).toBe('')
+    expect(out('stdin')).toBe('{"base":"https://apps.example/"}')
+  })
+
+  it.each([
+    ['a path as job id', ['render', '../../etc']],
+    ['an option as job id', ['render', '--privileged']],
+    ['extra arguments', ['render', ID, '--network=host']],
+  ])('refuses %s', (_name, args) => {
+    expect(launch(args, '{}').status).toBe(64)
+    expect(existsSync(join(dir, 'args'))).toBe(false)
+  })
+})
+
 describe('ag-sandbox kill', () => {
-  it('kills only the container of that job', () => {
+  it('kills the two containers of that job and no other', () => {
     expect(launch(['kill', ID]).status).toBe(0)
-    expect(out('args').trim().split('\n')).toEqual(['kill', `ag-job-${ID}`])
+    expect(out('args').trim().split('\n')).toEqual(['kill', `ag-job-${ID}`, 'kill', `ag-render-${ID}`])
   })
 })
