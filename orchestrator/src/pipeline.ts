@@ -35,14 +35,18 @@ const loadLibs = async (dir: string) => {
   return libs
 }
 
-// What a job has cost, as the key proxy counted it. The job's own token may
-// have run out with its deadline, so the question is asked with a fresh one.
-export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string) => {
+// What a job has used, as the key proxy counted it: requests, tokens of each
+// kind and their price. The job's own token may have run out with its
+// deadline, so the question is asked with a fresh one.
+export const jobUsage = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string) => {
   const token = signJobToken(cfg.PROXY_SIGNING_SECRET, jobId, Math.ceil(Date.now() / 1000) + 30)
   const res = await fetch(`${cfg.PROXY_URL}/v1/usage`, { headers: { 'x-api-key': token }, signal: AbortSignal.timeout(5000) })
   if (!res.ok) throw new Error(`the key proxy answered ${res.status}`)
-  return Number(((await res.json()) as { costMicroUsd: unknown }).costMicroUsd) || 0
+  const used = (await res.json()) as Record<string, unknown>
+  const count = (name: string) => Number(used[name]) || 0
+  return { requests: count('requests'), input: count('input'), output: count('output'), cacheRead: count('cacheRead'), cacheWrite: count('cacheWrite'), costMicroUsd: count('costMicroUsd') }
 }
+export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string) => (await jobUsage(cfg, jobId)).costMicroUsd
 
 // What the published picture of an app may weigh.
 const PREVIEW_MAX_BYTES = 300_000

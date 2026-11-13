@@ -1,0 +1,18 @@
+[
+  { "id": "poll", "tags": ["table", "chart", "example"], "prompt": "A live poll where visitors vote for their favourite programming language, with a bar chart of all votes that updates as they come in" },
+  { "id": "weather", "tags": ["live", "chart", "example"], "prompt": "A weather dashboard for any city with today's conditions and a chart of the next seven days" },
+  { "id": "tip", "tags": ["tool"], "prompt": "A tip calculator that splits a restaurant bill between friends" },
+  { "id": "pomodoro", "tags": ["tool"], "prompt": "A pomodoro timer with a task list and a count of finished sessions" },
+  { "id": "units", "tags": ["tool"], "prompt": "A unit converter for length, weight and temperature" },
+  { "id": "budget", "tags": ["chart"], "prompt": "A monthly budget tracker with categories and a chart of where the money goes" },
+  { "id": "habits", "tags": ["tool"], "prompt": "A habit tracker with a weekly grid and streaks" },
+  { "id": "memory", "tags": ["game"], "prompt": "A memory card game with pairs of pictures and a move counter" },
+  { "id": "snake", "tags": ["game"], "prompt": "A snake game that also works on a phone" },
+  { "id": "guestbook", "tags": ["table"], "prompt": "A guestbook where visitors leave a short message for everyone to read" },
+  { "id": "shopping", "tags": ["table"], "prompt": "A shared shopping list that a family can edit together" },
+  { "id": "currency", "tags": ["live", "chart"], "prompt": "A currency converter with a chart of the rate over the last 90 days" },
+  { "id": "bike", "tags": ["live"], "prompt": "Is today a good day for a bike ride? Show wind, rain and temperature for my city and say yes or no" },
+  { "id": "wifi", "tags": ["qr"], "prompt": "A guest Wi-Fi card with a QR code that guests scan to join the network" },
+  { "id": "todo", "tags": ["vague"], "prompt": "a to-do list" },
+  { "id": "chat", "tags": ["too-much"], "prompt": "A chat app where people sign up with e-mail and password and send each other private messages" }
+]
