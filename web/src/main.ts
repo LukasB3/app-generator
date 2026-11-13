@@ -34,6 +34,15 @@ const formError = $('form-error')
 const board = $('job')
 const result = $('result')
 const resultLink = $<HTMLAnchorElement>('result-link')
+// The picture the server took of the finished app. It is shown once it has
+// loaded; an app without one (or a picture that does not arrive) shows nothing.
+const preview = $<HTMLAnchorElement>('preview')
+const picture = preview.querySelector('img')!
+picture.addEventListener('load', () => (preview.hidden = false))
+const hidePreview = () => {
+  preview.hidden = true
+  picture.removeAttribute('src')
+}
 // The steps stand in the page, in the order every request takes them. The
 // first has no job status: the server screens a request before it makes a job.
 const stages = [...document.querySelectorAll<HTMLLIElement>('#stages > li')]
@@ -172,12 +181,17 @@ const show = (job: JobState) => {
     // A changed app keeps its address. Naming the build makes the browser fetch it instead of a copy it has kept.
     resultLink.href = `${job.url}?v=${job.id}`
     resultLink.dataset.address = job.url
+    preview.href = resultLink.href
+    picture.src = `${job.url}preview.png?v=${job.id}`
     const wasHidden = result.hidden
     result.hidden = false
     // Only a visitor who scrolled away in the meantime is brought back to the link.
     if (wasHidden && narrow.matches) showBoard()
   }
-  if (job.status === 'failed') result.hidden = true
+  if (job.status === 'failed') {
+    result.hidden = true
+    hidePreview()
+  }
   if (job.status === 'done' || job.status === 'failed') {
     stopClock()
     busy = false
@@ -239,6 +253,7 @@ const reset = () => {
   history.replaceState(null, '', location.pathname)
   clearNotes()
   result.hidden = true
+  hidePreview()
   showSteps(-1, 'ahead')
   setStatus('idle', IDLE_TITLE)
   refreshSubmit()
@@ -258,6 +273,7 @@ form.addEventListener('submit', async (event) => {
   clearNotes()
   forgetHold()
   result.hidden = true
+  hidePreview()
   startClock()
   // Screening is both gates, so the first step runs from the click: Cloudflare's
   // check in the browser, then the server, which screens before it answers.
