@@ -60,6 +60,29 @@ jobs:
       - run: npm audit --audit-level=high
       - run: docker build --tag ag-dbgate .
 
+  render:
+    runs-on: ubuntu-latest
+    # The browser check for real: the launcher, the image, gVisor and a
+    # browser, set up as on the server and run against the small apps in
+    # render/fixtures. The browser starts under gVisor only, so this also
+    # shows that the pinned gVisor and the pinned browser still fit together.
+    env:
+      TEST_RENDER: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: orchestrator/package-lock.json
+      - run: sudo infra/install-gvisor.sh
+      - run: docker build --tag ag-render:latest render
+      - run: sudo install -D -m 644 infra/sandbox.conf /etc/app-generator/sandbox.conf
+      - run: npm ci
+        working-directory: orchestrator
+      - run: npx vitest run test/render.container.test.ts
+        working-directory: orchestrator
+
   web:
     runs-on: ubuntu-latest
     defaults:
