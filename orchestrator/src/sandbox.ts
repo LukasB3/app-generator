@@ -21,6 +21,8 @@ export interface AgentRun {
   onFile: (path: string) => void
   // The agent asked the database gateway for a table or a column.
   onDatabaseWish: () => void
+  // The model that answered, as the agent's stream names it.
+  onModel?: (model: string) => void
 }
 
 const SAFE_PATH = /^[a-z0-9][a-z0-9._/-]{0,120}$/i
@@ -29,7 +31,7 @@ const DATABASE_WISHES = new Set(['mcp__db__create_table', 'mcp__db__add_column']
 // What one line of the agent's stream-json output says: how the run ended,
 // which files it wrote, and whether it asked the database gateway for anything.
 export const agentSteps = (line: string) => {
-  const steps: { outcome?: 'success' | 'error'; files: string[]; askedDatabase: boolean } = { files: [], askedDatabase: false }
+  const steps: { outcome?: 'success' | 'error'; files: string[]; askedDatabase: boolean; model?: string } = { files: [], askedDatabase: false }
   let event: any
   try {
     event = JSON.parse(line)
@@ -38,6 +40,7 @@ export const agentSteps = (line: string) => {
   }
   if (event?.type === 'result') steps.outcome = event.subtype === 'success' && !event.is_error ? 'success' : 'error'
   if (event?.type !== 'assistant' || !Array.isArray(event.message?.content)) return steps
+  if (typeof event.message.model === 'string') steps.model = event.message.model.replace(/[^a-z0-9.-]/gi, '').slice(0, 60)
   for (const block of event.message.content) {
     if (block?.type !== 'tool_use') continue
     if (DATABASE_WISHES.has(block.name)) steps.askedDatabase = true
@@ -92,6 +95,7 @@ export const runAgent = (cfg: Config, job: AgentRun) =>
       outcome = steps.outcome ?? outcome
       for (const file of steps.files) job.onFile(file)
       if (steps.askedDatabase) job.onDatabaseWish()
+      if (steps.model) job.onModel?.(steps.model)
     })
 
     child.on('error', (error) => {

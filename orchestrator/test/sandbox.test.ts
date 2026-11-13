@@ -11,6 +11,14 @@ describe('reading the agent\'s stream', () => {
     expect(agentSteps(assistant(tool('Read', { file_path: '/workspace/index.html' }))).files).toEqual([])
   })
 
+  it('names the model that answered, tidied up', () => {
+    const answer = (model: unknown) => JSON.stringify({ type: 'assistant', message: { model, content: [{ type: 'text', text: 'Done.' }] } })
+    expect(agentSteps(answer('claude-sonnet-5-5')).model).toBe('claude-sonnet-5-5')
+    expect(agentSteps(answer('claude-opus-5-5<script>')).model).toBe('claude-opus-5-5script')
+    expect(agentSteps(answer(undefined)).model).toBeUndefined()
+    expect(agentSteps(JSON.stringify({ type: 'result', subtype: 'success', model: 'claude-sonnet-5-5' })).model).toBeUndefined()
+  })
+
   it('notices a wish for a table or a column, and nothing else the database tools do', () => {
     expect(agentSteps(assistant(tool('mcp__db__create_table', { table: 'entries' }))).askedDatabase).toBe(true)
     expect(agentSteps(assistant(tool('mcp__db__add_column', { table: 'entries', name: 'author', type: 'text' }))).askedDatabase).toBe(true)
