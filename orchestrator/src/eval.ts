@@ -18,6 +18,12 @@ import { ValidationError } from './validate.js'
 // here are not jobs of the site, so they count against none of its limits.
 //
 //   node dist/eval.js --variant baseline [--reps 2] [--only poll,todo] [--budget-usd 10] [--model claude-sonnet-5-5]
+//   node dist/eval.js --variant v1 --trial [--libs <folder>] …
+//
+// With --trial the agent runs in the image and with the model that root put
+// on trial (the launcher's "try"), and --libs names the bundled libraries of
+// the candidate. That is how new instructions, libraries or another model are
+// measured against the baseline before the website gets them.
 //
 // Results go to <DATA_DIR>/evals/<variant>/: one line per build in
 // results.jsonl, builds that never got a fair try in errors.jsonl, each app
@@ -68,7 +74,7 @@ const seconds = (ms: number) => Math.round(ms / 100) / 10
 
 // Builds one request once. Returns the row for results.jsonl, or an error for
 // a build that failed for a reason that says nothing about the agent.
-export const buildCase = async (cfg: Config, tools: Tools, dir: string, each: Case, rep: number, expectModel?: string): Promise<Row | { error: string; job: string }> => {
+export const buildCase = async (cfg: Config, tools: Tools, dir: string, each: Case, rep: number, { expectModel, trial = false }: Pick<Plan, 'expectModel' | 'trial'> = {}): Promise<Row | { error: string; job: string }> => {
   const id = tools.newId()
   const appDir = join(dir, 'apps', `${each.id}_rep${rep}`)
   const statuses: { status: string; at: number }[] = []
@@ -81,7 +87,7 @@ export const buildCase = async (cfg: Config, tools: Tools, dir: string, each: Ca
   const pipeline = createPipeline(
     cfg,
     { getApp: () => undefined, setCurrentJob: () => {}, setHasDb: () => {} },
-    (config, job) => tools.run(config, { ...job, onModel: (model) => void models.set(model, (models.get(model) ?? 0) + 1) }),
+    (config, job) => tools.run(config, { ...job, trial, onModel: (model) => void models.set(model, (models.get(model) ?? 0) + 1) }),
     async (_appId, _jobId, files) => {
       published = files
       for (const [path, bytes] of files) {
@@ -159,6 +165,8 @@ export interface Plan {
   reps: number
   budgetUsd: number
   expectModel?: string
+  // Build with what is on trial instead of what the website uses.
+  trial?: boolean
 }
 
 // Builds every request of the plan that has no line in results.jsonl yet, one at a time.
@@ -181,7 +189,7 @@ export const runEval = async (cfg: Config, tools: Tools, root: string, plan: Pla
         tools.log(`stopped: $${spent.toFixed(2)} spent of $${plan.budgetUsd}`)
         return done
       }
-      const row = await buildCase(cfg, tools, dir, each, rep, plan.expectModel)
+      const row = await buildCase(cfg, tools, dir, each, rep, plan)
       if ('error' in row) {
         line(join(dir, 'errors.jsonl'), { prompt_id: each.id, rep, at: new Date().toISOString(), ...row })
         tools.log(`${each.id} #${rep}: not counted: ${row.error}`)
@@ -200,15 +208,25 @@ export const runEval = async (cfg: Config, tools: Tools, root: string, plan: Pla
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { values } = parseArgs({
-    options: { variant: { type: 'string' }, cases: { type: 'string' }, out: { type: 'string' }, reps: { type: 'string', default: '1' }, only: { type: 'string' }, 'budget-usd': { type: 'string', default: '10' }, model: { type: 'string' } },
+    options: {
+      variant: { type: 'string' },
+      cases: { type: 'string' },
+      out: { type: 'string' },
+      reps: { type: 'string', default: '1' },
+      only: { type: 'string' },
+      'budget-usd': { type: 'string', default: '10' },
+      model: { type: 'string' },
+      trial: { type: 'boolean', default: false },
+      libs: { type: 'string' },
+    },
   })
-  const cfg = loadConfig()
+  const cfg = { ...loadConfig(), ...(values.libs ? { LIBS_DIR: values.libs } : {}) }
   const all = JSON.parse(readFileSync(values.cases ?? join(import.meta.dirname, '../evals/cases.json'), 'utf8')) as Case[]
   const only = values.only?.split(',')
   await runEval(
     cfg,
     { run: runAgent, open: openApp, gate: gateway(cfg), usage: jobUsage, newId: newJobId, log: (text) => console.log(text) },
     values.out ?? join(cfg.DATA_DIR, 'evals'),
-    { variant: values.variant ?? '', cases: only ? all.filter((each) => only.includes(each.id)) : all, reps: Number(values.reps), budgetUsd: Number(values['budget-usd']), expectModel: values.model },
+    { variant: values.variant ?? '', cases: only ? all.filter((each) => only.includes(each.id)) : all, reps: Number(values.reps), budgetUsd: Number(values['budget-usd']), expectModel: values.model, trial: values.trial },
   )
 }

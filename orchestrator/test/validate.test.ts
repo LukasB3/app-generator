@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { loadLibs } from '../src/pipeline.js'
 import { signJobToken } from '../src/token.js'
 import { CSP, LIMITS, ValidationError, validateWorkspace } from '../src/validate.js'
 
@@ -97,7 +98,7 @@ describe('accepted apps', () => {
 
   it('ships the real bundled libraries to an app that uses them', async () => {
     const libsDir = join(import.meta.dirname, '../../sandbox/libs')
-    const libs = new Map(await Promise.all((await readdir(libsDir)).filter((name) => name.endsWith('.js')).map(async (name) => [name, await readFile(join(libsDir, name))] as const)))
+    const libs = await loadLibs(libsDir)
     const { files: out } = await validateWorkspace(
       await workspace({
         'index.html': page('<canvas id="chart"></canvas><div id="app"></div><script src="lib/chart.js"></script><script src="lib/preact.js"></script><script src="app.js"></script>'),
@@ -108,6 +109,36 @@ describe('accepted apps', () => {
     expect([...out.keys()].sort()).toEqual(['app.js', 'index.html', 'lib/chart.js', 'lib/preact.js'])
     expect(out.get('lib/chart.js')!.toString()).toContain('Chart.js v4.5.1')
     expect(out.get('lib/preact.js')!.toString()).toContain('htmPreact')
+  })
+
+  it('ships a library that is a folder whole, and only the folders an app uses', async () => {
+    const libs = new Map([
+      ['chart.js', Buffer.from('/* chart */')],
+      ['fonts/inter/font.css', Buffer.from('@font-face { font-family: Inter; src: url(inter-latin.woff2) }')],
+      ['fonts/inter/inter-latin.woff2', Buffer.from([0x77, 0x4f, 0x46, 0x32, 0x00, 0xff])],
+      ['fonts/inter/LICENSE.txt', Buffer.from('SIL Open Font License')],
+      ['fonts/nunito/font.css', Buffer.from('@font-face { font-family: Nunito; src: url(nunito-latin.woff2) }')],
+      ['fonts/nunito/nunito-latin.woff2', Buffer.from([0x77, 0x4f, 0x46, 0x32, 0x01])],
+    ])
+    const { files: out } = await validateWorkspace(
+      await workspace({ 'index.html': page('<h1>Hi</h1><script src="app.js"></script>', '<link rel="stylesheet" href="lib/fonts/inter/font.css"><link rel="stylesheet" href="style.css">'), 'style.css': 'body { font-family: Inter, sans-serif }', 'app.js': 'let n = 0' }),
+      { ...opts, libs },
+    )
+    expect([...out.keys()].sort()).toEqual(['app.js', 'index.html', 'lib/fonts/inter/LICENSE.txt', 'lib/fonts/inter/font.css', 'lib/fonts/inter/inter-latin.woff2', 'style.css'])
+    // Bytes, not text: a font is published exactly as it is bundled.
+    expect([...out.get('lib/fonts/inter/inter-latin.woff2')!]).toEqual([0x77, 0x4f, 0x46, 0x32, 0x00, 0xff])
+    expect(out.get('index.html')!.toString()).toContain('href="lib/fonts/inter/font.css?v=job123"')
+  })
+
+  it('lets a stylesheet of the app name a bundled font file itself, and refuses one that is not bundled', async () => {
+    const libs = new Map([
+      ['fonts/inter/font.css', Buffer.from('@font-face {}')],
+      ['fonts/inter/inter-latin.woff2', Buffer.from('font')],
+    ])
+    const app = (source: string) => workspace({ 'index.html': page('<h1>Hi</h1>', '<link rel="stylesheet" href="style.css">'), 'style.css': `@font-face { font-family: Mine; src: url(${source}) }` })
+    const { files: out } = await validateWorkspace(await app('lib/fonts/inter/inter-latin.woff2'), { ...opts, libs })
+    expect([...out.keys()].sort()).toEqual(['index.html', 'lib/fonts/inter/font.css', 'lib/fonts/inter/inter-latin.woff2', 'style.css'])
+    await expect(validateWorkspace(await app('lib/fonts/comic/comic.woff2'), { ...opts, libs })).rejects.toThrow('url() must point to a file inside the app')
   })
 })
 

@@ -7,10 +7,13 @@ const env = (name: string, fallback?: string) => {
 }
 
 // USD per million tokens, from platform.claude.com/docs/en/about-claude/pricing
-// (read 2026-11-09). The meter must never count low: cache writes are priced at
+// (read 2026-11-13). The meter must never count low: cache writes are priced at
 // the one-hour rate, and Haiku 5.5 at its rate for prompts over 100,000 tokens.
+// The launcher tells the agent which model to use, but a container could ask
+// for any model listed here. Its budget in dollars holds whichever it asks for.
 const PRICES = new Map<string, Usage>([
   ['claude-sonnet-5-5', { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 4 }],
+  ['claude-opus-5-5', { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 }],
   ['claude-haiku-5-5', { input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 1 }],
   ['claude-haiku-4-5-20251001', { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 2 }],
 ])

@@ -6,6 +6,9 @@
 #
 #   ag-sandbox run <job-id>     stdin: the job token, then the job's token for
 #                               the database tools or "-", then the prompt
+#   ag-sandbox try <job-id>     the same, with the image and the model that are
+#                               on trial. For eval runs: this is how a candidate
+#                               is measured before the website gets it
 #   ag-sandbox render <job-id>  stdin: the checked app as one JSON document;
 #                               stdout: what a browser made of it
 #   ag-sandbox kill <job-id>
@@ -13,10 +16,12 @@ set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 conf=/etc/app-generator/sandbox.conf
+trial=/etc/app-generator/sandbox-trial.conf
 docker=/usr/bin/docker
 if [[ $EUID -ne 0 ]]; then
   # Test hooks. Ignored when running as root, which is how sudo runs it.
   conf=${PG_SANDBOX_CONF:-$conf}
+  trial=${PG_TRIAL_CONF:-$trial}
   docker=${PG_DOCKER:-$docker}
 fi
 
@@ -25,7 +30,7 @@ die() {
   exit 64
 }
 
-[[ $# -eq 2 ]] || die "usage: ag-sandbox run|render|kill <job-id>"
+[[ $# -eq 2 ]] || die "usage: ag-sandbox run|try|render|kill <job-id>"
 action=$1
 id=$2
 [[ $id =~ ^[a-z2-7]{20}$ ]] || die "invalid job id"
@@ -57,7 +62,14 @@ render)
     --env HOME=/tmp \
     "$RENDER_IMAGE"
   ;;
-run)
+run | try)
+  if [[ $action == try ]]; then
+    [[ -f $trial && ! -L $trial ]] || die "nothing is on trial"
+    # Two settings may differ from the website's, and no others, whatever else the file says.
+    IMAGE=$(unset IMAGE && source "$trial" && printf '%s' "${IMAGE:-}")
+    MODEL=$(unset MODEL && source "$trial" && printf '%s' "${MODEL:-}")
+    [[ -n $IMAGE && -n $MODEL ]] || die "the trial names no image or no model"
+  fi
   IFS= read -r token || die "missing token"
   [[ $token =~ ^pgj1\.[a-z2-7]{20}\.[0-9]{1,12}\.[a-f0-9]{64}$ && $token == "pgj1.$id."* ]] || die "invalid token"
   # Without a database the orchestrator sends "-", which opens nothing.

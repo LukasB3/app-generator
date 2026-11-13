@@ -1,7 +1,7 @@
-import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Config } from '../src/config.js'
+import { loadLibs } from '../src/pipeline.js'
 import { openApp } from '../src/render.js'
 import { validateWorkspace } from '../src/validate.js'
 
@@ -12,7 +12,7 @@ import { validateWorkspace } from '../src/validate.js'
 // that up; anywhere else it runs with TEST_RENDER=1.
 const root = join(import.meta.dirname, '../..')
 const cfg = { SANDBOX_LAUNCHER: join(root, 'infra/ag-sandbox') } as Config
-const libs = new Map(readdirSync(join(root, 'sandbox/libs')).filter((name) => name.endsWith('.js')).map((name) => [name, readFileSync(join(root, 'sandbox/libs', name))]))
+const libs = await loadLibs(join(root, 'sandbox/libs'))
 const database = { url: 'https://project.example', key: 'public-key', prefix: 'afixture_' }
 const liveData = 'https://api.example/api/data/'
 const ID = 'fixturefixturefixtur'

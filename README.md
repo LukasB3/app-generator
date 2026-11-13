@@ -94,7 +94,7 @@ node dist/eval.js --variant baseline --reps 2   # on the server, as the service 
 
 This builds the 16 requests in `orchestrator/evals/cases.json` with the real pipeline: the same agent, key proxy, checker and browser check as the website. Nothing is published and no table is created, and the builds count against none of the site's limits. For every build it writes down whether an app came out, whether that took the repair round, what the browser check found, how long each step took, what it cost as the key proxy counted it, and which model answered, and it keeps the app with a picture of it at phone and desktop size.
 
-A change to the instructions or the model is a second variant (`v1`, `v2`, …) over the same requests. The numbers are compared directly; for looks, a person sees the pictures of both variants side by side without being told which is which.
+A change to the instructions, the bundled libraries or the model is a second variant (`v1`, `v2`, …) over the same requests, and it is measured before the website gets it: root puts the candidate's image and model on trial in `/etc/app-generator/sandbox-trial.conf`, and `--trial` (with `--libs` for candidate libraries) has the eval run build with those while the website keeps building with its own. The numbers are compared directly; for looks, a person sees the pictures of both variants side by side without being told which is which.
 
 ## Deployment
 

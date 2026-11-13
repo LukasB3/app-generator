@@ -303,8 +303,12 @@ export const validateWorkspace = async (root: string, opts: ValidateOptions) => 
   if (problems.length) throw new ValidationError([...new Set(problems)].slice(0, 25))
 
   // Bundled libraries are always published from our pristine copies, and only
-  // the ones the app actually references.
+  // the ones the app actually references. A library that is a folder goes out
+  // whole: a font's stylesheet brings the font files and the licence with it.
   const referenced = [...sources.values()].join('\n')
-  for (const [name, bytes] of opts.libs) if (referenced.includes(`lib/${name}`)) out.set(`lib/${name}`, bytes)
+  const folder = (name: string) => name.slice(0, name.lastIndexOf('/') + 1)
+  const wanted = new Set([...opts.libs.keys()].filter((name) => referenced.includes(`lib/${name}`)))
+  const folders = new Set([...wanted].map(folder).filter(Boolean))
+  for (const [name, bytes] of opts.libs) if (wanted.has(name) || folders.has(folder(name))) out.set(`lib/${name}`, bytes)
   return { files: out, sources, uses }
 }

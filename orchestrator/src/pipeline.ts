@@ -1,5 +1,5 @@
 import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import type { Config } from './config.js'
 import { DatabaseDown, gateway } from './gate.js'
 import { AppGone, createPublisher } from './publish.js'
@@ -29,9 +29,17 @@ export const publicError = (error: unknown) => {
   return 'Something went wrong while building your app.'
 }
 
-const loadLibs = async (dir: string) => {
+// The bundled libraries by their path under lib/: scripts at the top, and
+// folders of files that belong together, such as a font with its stylesheet
+// and licence. What documents the folder itself (the README, build scripts)
+// is not part of it.
+export const loadLibs = async (dir: string) => {
   const libs = new Map<string, Buffer>()
-  for (const name of await readdir(dir)) if (name.endsWith('.js')) libs.set(name, await readFile(join(dir, name)))
+  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || entry.name.startsWith('.') || entry.name === 'README.md' || entry.name.endsWith('.mjs')) continue
+    const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join('/')
+    libs.set(path, await readFile(join(dir, path)))
+  }
   return libs
 }
 
