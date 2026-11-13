@@ -24,7 +24,7 @@ Design the app; do not fill in a template. The look comes from what the app is f
 
 Decide before you write the first file, and write the decisions down as custom properties at the top of `style.css`, so that everything else uses them:
 
-- **Colour.** Four to six colours, each with a job: page, surface, text, quiet text, one accent, and a second accent only if the app has two things to tell apart. Take them from the subject, not from habit. Text must be easy to read on its background, small text included.
+- **Colour.** Four to six colours, each with a job: page, surface, text, quiet text, one accent, and a second accent only if the app has two things to tell apart. Take them from the subject, not from habit: a tomato red for a pomodoro timer, the green of a card table for a card game. Where the subject has no colour of its own, the build message names one to start from. Build the palette around it, as the accent or as the page itself, light or dark as suits the app. Text must be easy to read on its background, small text included.
 - **Type.** One or two of the bundled fonts, chosen for this app, and a short scale of sizes. Numbers that change or stand in columns get `font-variant-numeric: tabular-nums`. The largest figure fits its box at every width with the longest value it can show: size it with `clamp()`, and a number never breaks across two lines (`white-space: nowrap`).
 - **Layout.** One idea that fits the content. On a phone the app fills the width with comfortable margins. On a wide screen it uses the room: two areas side by side, a board with its controls next to it, a list beside its summary.
 
