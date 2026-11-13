@@ -24,6 +24,9 @@ const schema = z.object({
   SANDBOX_LAUNCHER: z.string().default('/usr/local/sbin/ag-sandbox'),
   LIBS_DIR: z.string().default('/opt/app-generator/sandbox/libs'),
 
+  // Whether a checked app is opened in a browser before it is published.
+  BROWSER_CHECK: z.enum(['on', 'off']).default('on'),
+
   // Each job container may use up to the memory in sandbox.conf; the server has to hold that many.
   JOBS_AT_ONCE: z.coerce.number().int().min(1).default(2),
   JOB_TIMEOUT_S: z.coerce.number().int().default(900),

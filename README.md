@@ -16,6 +16,7 @@ flowchart LR
     S -->|job token| P[Key proxy<br/>holds the API key]
     S -->|asks for tables| D[Database gateway<br/>holds the database login]
     O -->|reads workspace| C[Checker<br/>plain code]
+    C -->|checked files| X[Browser check<br/>no network, gVisor]
     C -->|creates the tables| D
     C --> G[Publisher<br/>git + deploy key]
   end
@@ -28,7 +29,7 @@ flowchart LR
 1. The website sends the prompt and a Turnstile token to the orchestrator.
 2. The orchestrator applies the limits and has a small model screen the prompt: gibberish, abusive requests and requests that carry personal data are turned away with a message before anything is queued. Then it queues the job and streams progress back (`queued → preparing → coding → checking → publishing → done`), including the files the agent writes and a note when a database is asked for or set up, or live data is allowed.
 3. For each job a fresh container starts with a workspace that holds only the bundled libraries. The agent has the Read, Write, Edit, Glob and Grep tools, and three tools of the database gateway with which it can ask for tables for the app. Asking changes nothing: the gateway checks the wish and writes it down.
-4. When the agent stops, the checker validates the workspace. If it finds problems, the agent gets one repair round with the findings. Only after the app has passed are the tables it asked for created, all at once.
+4. When the agent stops, the checker validates the workspace. An app that passes is opened once in a headless browser, in a container of its own with no network, which reports script errors, missing values, a blank page or one that is wider than a phone. If the checker or the browser finds problems, the agent gets one repair round with the findings. Only after the app has passed the checker are the tables it asked for created, all at once.
 5. The publisher commits the checked files to `apps/<app-id>/` in a dedicated repository and waits until GitHub Pages serves them.
 6. Someone who was logged in can change their app later with another request. That is a new job on the same app: it starts from the app's files as they last passed the checker, the whole result is checked again, and it is published at the same address. Links from the page to its own files carry the id of the job that built them, because the host lets browsers keep a file for ten minutes.
 
@@ -42,6 +43,7 @@ flowchart LR
 | Web-facing process gets compromised | The orchestrator has no Docker access. It can only ask a root-owned launcher to start or kill the container for a job id; image, network, limits and mounts are fixed there. |
 | Agent gets at git or GitHub | The image has no git and no credentials. The orchestrator publishes with a deploy key that is valid for the apps repository only. |
 | Malicious output is published | The checker allows only `.html`, `.css`, `.js`, `.json` and `.txt` within size and count limits, rejects symlinks, secrets, inline scripts, external or absolute URLs, iframes, password and card fields, and forms that submit anywhere. HTML is re-serialised with a strict CSP (`connect-src 'none'`, `form-action 'none'`, `script-src 'self'`) and a visible "AI-generated" badge. The one exception to `connect-src 'none'` is a page of an app with tables, which may reach the database's Data API and nothing else. |
+| Generated code runs on the server | It does in one place: the browser check. The browser has a throwaway container of its own, with no network, no mount and no token, under gVisor, and keeps its own sandbox on inside it. Its requests are answered from the app's files and from stand-ins for the database and live data. Its report is read against a strict schema and its picture of the page is rebuilt, not passed on. Nothing depends on the check: an app that defeats it is published as if there were none. |
 | Injection through the prompt | The prompt reaches the agent on stdin only. Job ids are generated server-side and are the only request-derived value in any path or command. Every subprocess is started with an argument array, never through a shell. |
 | Nonsense, abusive requests, personal data | One short classification call (Claude Haiku 5.5, through the key proxy with a job token) before a job is queued. It is a courtesy filter, not a boundary: its answer is one of four fixed values, and a prompt that fools it only reaches the sandbox and the checker like any other. Personal data it misses is built like any other text, so the rules still forbid sending it. If the call fails, the request goes through. |
 | Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online, and that its owner can change it. For everyone else the change route answers as if the app did not exist. An account that is not used for 90 days is deleted by a job inside the database. |
@@ -60,6 +62,7 @@ The full reasoning, including the trade-offs that remain, is in [docs/threat-mod
 | `orchestrator/` | API, queue, sandbox runner, checker, publisher and the key proxy (Node 22, TypeScript, Fastify, built-in SQLite). |
 | `dbgate/` | The database gateway: creates and removes the tables of generated apps (Node 22, TypeScript, `pg`). |
 | `sandbox/` | Image for the agent container, its system prompt and the bundled libraries. |
+| `render/` | Image for the browser check: a pinned headless Chromium, its driver, the stand-ins it answers with and small apps to test it on. |
 | `infra/` | Provisioning and deploy scripts, sandbox launcher, Caddy config, systemd unit, compose file, database setup. |
 
 ## Development
@@ -69,7 +72,7 @@ nvm use
 
 cd orchestrator
 npm ci
-npm test          # checker, proxy, launcher, token, API and queue tests
+npm test          # checker, browser check, proxy, launcher, token, API and queue tests
 npm run typecheck
 
 cd ../dbgate
@@ -81,7 +84,7 @@ npm ci
 npm run dev       # expects the API on http://localhost:8787
 ```
 
-The tests cover the parts that carry the security claims: what the checker rejects, what the proxy refuses to forward, the limits of the API, the flags the sandbox is started with, and what the database gateway's role and a visitor can and cannot do in a real Postgres.
+The tests cover the parts that carry the security claims: what the checker rejects, what the proxy refuses to forward, the limits of the API, the flags the two containers are started with, what is accepted from the browser container, and what the database gateway's role and a visitor can and cannot do in a real Postgres. CI also runs the browser check for real, under gVisor, against the apps in `render/fixtures`.
 
 ## Deployment
 
@@ -94,6 +97,8 @@ sudo API_DOMAIN=api.app-generator.example WEB_ORIGIN=https://app-generator.examp
 # put the Turnstile secret into /etc/app-generator/orchestrator.env
 sudo ./infra/deploy.sh
 ```
+
+`provision.sh` and `deploy.sh` install gVisor at a pinned release (`infra/install-gvisor.sh`). The browser check needs it and is skipped without it; `BROWSER_CHECK=off` in `orchestrator.env` switches the check off.
 
 The website is a Vercel project with `web/` as its root directory and `VITE_API_BASE` and `VITE_TURNSTILE_SITEKEY` set.
 
@@ -114,6 +119,7 @@ Accounts are optional. They need a Supabase project with e-mail login, its own S
 | Jobs overall | 10 per hour, 30 per day, $10 per day, $90 per 30 days |
 | Queue length | 10 |
 | Prompt length | 1,000 characters |
+| Browser check | one at a time, 20 seconds, 768 MB; its picture of the page is published up to 300 kB |
 | App size | 30 files, 300 kB per file, 1.5 MB in total |
 | App lifetime | 1 day, or 10 days when requested from an account, then removed from the apps repository |
 | App data | 3 tables per app with 12 columns each, 500 rows per table, 2 kB per row, 150 tables overall; dropped with the app |

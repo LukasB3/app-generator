@@ -142,6 +142,8 @@ describe('rejected apps', () => {
     ['css import', { 'index.html': page('x'), 'a.css': '@import "https://evil.example/x.css";' }, /@import/],
     ['css external url', { 'index.html': page('x'), 'a.css': 'p { background: url(https://evil.example/t.gif) }' }, /url\(\) must point/],
     ['external css in style tag', { 'index.html': page('', '<style>p{background:url(//evil.example/t.gif)}</style>') }, /url\(\) must point/],
+    // The policy of a published page allows fonts from its own folder only, so one packed into the CSS would never load.
+    ['a font packed into the css', { 'index.html': page('x'), 'a.css': '@font-face { font-family: f; src: url(data:font/woff2;base64,AAAA) }' }, /url\(\) must point/],
     ['external URL in script', { 'index.html': page('x'), 'a.js': 'location.href = "https://evil.example/login"' }, /external URLs are not allowed in scripts/],
     ['websocket URL in script', { 'index.html': page('x'), 'a.js': 'new WebSocket("wss://evil.example")' }, /external URLs/],
     ['service worker', { 'index.html': page('x'), 'a.js': 'navigator.serviceWorker.register("a.js")' }, /workers/],

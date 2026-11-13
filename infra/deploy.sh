@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds and (re)starts everything from a checkout in /opt/app-generator, and
-# installs what a release can change outside of it: the sandbox launcher and
-# its settings.
+# installs what a release can change outside of it: the sandbox launcher, its
+# settings and gVisor.
 # Usage: sudo ./deploy.sh [git-ref]
 set -euo pipefail
 
@@ -29,6 +29,8 @@ cd "$repo/infra"
 # The launcher and the orchestrator that calls it must be of the same release.
 install -o root -g root -m 755 ag-sandbox /usr/local/sbin/ag-sandbox
 install -o root -g root -m 644 sandbox.conf "$etc/sandbox.conf"
+# The runtime the browser check runs under, at the release this checkout pins.
+./install-gvisor.sh
 
 # The database gateway's secrets are made once and never overwritten: the
 # secret its passes are signed with, which the orchestrator shares, and the

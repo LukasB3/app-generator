@@ -53,6 +53,11 @@ services:
     image: ag-sandbox:latest
     profiles: [build]
 
+  render:
+    build: ../render
+    image: ag-render:latest
+    profiles: [build]
+
 networks:
   sandbox:
     name: ag-sandbox

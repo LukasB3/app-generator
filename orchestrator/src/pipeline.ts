@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { Config } from './config.js'
 import { DatabaseDown, gateway } from './gate.js'
 import { AppGone, createPublisher } from './publish.js'
+import { NOT_SEEN, openApp, type Seen } from './render.js'
 import { AgentError, JobTimeout, killContainer, runAgent } from './sandbox.js'
 import { saveSources, seedWorkspace } from './sources.js'
 import type { Job, JobStatus, Store } from './store.js'
@@ -43,9 +44,12 @@ export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SEC
   return Number(((await res.json()) as { costMicroUsd: unknown }).costMicroUsd) || 0
 }
 
-// The agent and the publisher can be swapped out, which is how the tests run
-// the steps in between without a container or a remote repository.
-export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCurrentJob' | 'setHasDb'>, run = runAgent, publish = createPublisher(cfg), gate = gateway(cfg)): Pipeline => {
+// What the published picture of an app may weigh.
+const PREVIEW_MAX_BYTES = 300_000
+
+// The agent, the publisher and the browser can be swapped out, which is how the
+// tests run the steps in between without a container or a remote repository.
+export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCurrentJob' | 'setHasDb'>, run = runAgent, publish = createPublisher(cfg), gate = gateway(cfg), open = openApp): Pipeline => {
   return async (job, report) => {
     // A first build shares its id with its app. Any other job changes an app that exists.
     const edit = job.appId !== job.id
@@ -89,20 +93,67 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
         })
         return { ...checked, changes }
       }
+      // The browser check: the app, exactly as it would be published, opened in
+      // a browser that is told the internet is the app's files and stand-ins
+      // for its tables and for live data. It never fails a build.
+      const look = async ({ files, sources, uses, changes }: Awaited<ReturnType<typeof check>>): Promise<Seen> => {
+        if (cfg.BROWSER_CHECK === 'off') return NOT_SEEN
+        const created = changes.filter((change) => change.action === 'create_table').map((change) => String(change.table))
+        return open(cfg, {
+          jobId: job.id,
+          base: `${cfg.APPS_BASE_URL}/apps/${job.appId}/`,
+          files,
+          sources,
+          database: uses.has('database') ? { url: gate.database(job.appId).url, prefix: gate.database(job.appId).prefix, tables: [...tables.map((table) => table.name), ...created] } : undefined,
+          liveData: uses.has('liveData') && cfg.API_ORIGIN ? `${cfg.API_ORIGIN}/api/data/` : undefined,
+        })
+      }
+      const attempt = async () => {
+        const checked = await check()
+        return { checked, seen: await look(checked) }
+      }
 
       report.status('coding')
       await agent()
 
       report.status('checking')
-      const { files, sources, uses, changes } = await check().catch(async (error: unknown) => {
+      // The checker and the browser check share one repair round.
+      let chosen = await attempt().catch((error: unknown) => {
         if (!(error instanceof ValidationError)) throw error
-        // One repair round: the checker's findings go back to the agent.
+        return error.problems
+      })
+      if (Array.isArray(chosen)) {
+        // The app broke a rule. The agent gets one try at it, and a second failure fails the build.
         report.note('The checker found problems, asking the agent to fix them')
         report.status('coding')
-        await agent(error.problems)
+        await agent(chosen)
         report.status('checking')
-        return check()
-      })
+        chosen = await attempt()
+      } else if (chosen.seen.problems.length) {
+        // The app may be published as it is. Whatever the repair does, that version stands unless the new one is better.
+        report.note('The browser check found problems, asking the agent to fix them')
+        report.status('coding')
+        const first = chosen
+        const setAside = (error: unknown) => {
+          console.error(`job ${job.id}: the repair after the browser check did not work out, the first version stands`, error)
+          return first
+        }
+        const repaired = await agent(first.seen.problems).then(
+          () => true,
+          (error: unknown) => (setAside(error), false),
+        )
+        report.status('checking')
+        if (repaired) chosen = await attempt().then((second) => (second.seen.problems.length < first.seen.problems.length ? second : first), setAside)
+      }
+      if (chosen.seen.problems.length) {
+        console.error(`job ${job.id}: published with browser findings: ${chosen.seen.problems.join(' | ')}`)
+        report.note('The browser check still has findings; the app is published as it is')
+      }
+      if (cfg.BROWSER_CHECK !== 'off' && !chosen.seen.ran) report.note('The browser check could not run')
+      const { sources, uses, changes } = chosen.checked
+      // A picture of the page goes out with the app. The agent cannot have written a file of that name.
+      const preview = chosen.seen.pictures.get('phone')
+      const files = preview && preview.length <= PREVIEW_MAX_BYTES ? new Map(chosen.checked.files).set('preview.png', preview) : chosen.checked.files
 
       // Only now, with the checker passed, does anything happen in the
       // database, and all of it at once. Tables are only ever added, so the

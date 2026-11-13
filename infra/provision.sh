@@ -13,7 +13,7 @@ export DEBIAN_FRONTEND=noninteractive
 echo "== packages"
 apt-get update -q
 apt-get -y -q full-upgrade
-apt-get -y -q install ca-certificates curl git ufw unattended-upgrades docker.io docker-compose-v2 docker-buildx caddy
+apt-get -y -q install ca-certificates curl git ufw unattended-upgrades docker.io docker-compose-v2 docker-buildx caddy zstd
 if ! node --version 2>/dev/null | grep -q '^v22\.'; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get -y -q install nodejs
@@ -72,6 +72,7 @@ install -o root -g root -m 755 "$here/ag-sandbox" /usr/local/sbin/ag-sandbox
 install -o root -g root -m 644 "$here/sandbox.conf" "$etc/sandbox.conf"
 install -o root -g root -m 440 "$here/sudoers" /etc/sudoers.d/app-generator
 visudo -cf /etc/sudoers.d/app-generator
+"$here/install-gvisor.sh"
 
 echo "== caddy"
 sed "s/{{API_DOMAIN}}/$API_DOMAIN/" "$here/Caddyfile" > /etc/caddy/Caddyfile

@@ -38,6 +38,10 @@
           <dd>A checker with no AI in it inspects every file: allowed types, size limits, no secrets, no outside scripts, no forms that send data anywhere.</dd>
         </div>
         <div>
+          <dt>A browser tries the app where it can do no harm</dt>
+          <dd>Before an app goes out it is opened once in a browser on the server, to catch errors and broken layouts. That browser runs in a container of its own, behind a second sandbox, with no network and nothing to steal.</dd>
+        </div>
+        <div>
           <dt>Nothing is created before the check</dt>
           <dd>A wish for a table is only written down. The tables are created after the app has passed the checker, by code that builds every database statement itself.</dd>
         </div>

@@ -6,7 +6,8 @@ import { loadConfig, type Config } from '../src/config.js'
 import { DatabaseDown, type Change, type Gateway } from '../src/gate.js'
 import { createPipeline, publicError, type Reporter } from '../src/pipeline.js'
 import { AppGone, type PublishHooks } from '../src/publish.js'
-import type { AgentRun } from '../src/sandbox.js'
+import { NOT_SEEN, type AppToOpen, type Seen } from '../src/render.js'
+import { AgentError, type AgentRun } from '../src/sandbox.js'
 import { Store } from '../src/store.js'
 
 const HOUR = 3_600_000
@@ -16,7 +17,7 @@ let dir: string
 let cfg: Config
 let store: Store
 let runs: AgentRun[]
-let published: { appId: string; jobId: string; html: string }[]
+let published: { appId: string; jobId: string; html: string; files: Map<string, Buffer> }[]
 
 // Stands in for the container: writes into the job's workspace what a test tells it to.
 let agent: (workspace: string, run: AgentRun) => void
@@ -27,7 +28,7 @@ const run = async (_cfg: Config, job: AgentRun) => {
 // Stands in for the repository: takes the files and reports the push.
 const publish = async (appId: string, jobId: string, files: Map<string, Buffer>, hooks: PublishHooks) => {
   if (!hooks.isLive()) throw new AppGone()
-  published.push({ appId, jobId, html: files.get('index.html')!.toString() })
+  published.push({ appId, jobId, html: files.get('index.html')!.toString(), files })
   await hooks.pushed()
   return `https://apps.example/apps/${appId}/`
 }
@@ -48,6 +49,8 @@ beforeEach(() => {
     // Nothing listens here: the launcher and the cost lookup fail quietly, as they may.
     PROXY_URL: 'http://127.0.0.1:9',
     SANDBOX_LAUNCHER: '/bin/false',
+    // The tests of the browser check hand the pipeline a browser of their own.
+    BROWSER_CHECK: 'off',
   })
   store = new Store(':memory:')
   runs = []
@@ -303,5 +306,169 @@ describe('apps with tables', () => {
     await expect(buildWith('job3')).rejects.toThrow(DatabaseDown)
     expect(runs).toHaveLength(2)
     expect(published).toHaveLength(2)
+  })
+})
+
+describe('the browser check', () => {
+  const picture = Buffer.from('a picture of the page')
+  const clean: Seen = { ran: true, problems: [], pictures: new Map([['phone', picture], ['desktop', Buffer.from('a wide picture')]]) }
+  const found = (...problems: string[]): Seen => ({ ...clean, problems })
+  const table: Change = { action: 'create_table', table: 'entries', mode: 'append', columns: [{ name: 'author', type: 'text' }] }
+
+  // Stands in for the browser container: says what a test tells it to, look after look.
+  let opened: AppToOpen[]
+  let sees: Seen[]
+  let asked: Change[]
+  let commits: Change[][]
+  const open = async (_cfg: Config, app: AppToOpen) => {
+    opened.push(app)
+    return sees.shift() ?? clean
+  }
+  const gate = (): Gateway => ({
+    enabled: true,
+    token: () => 'agd1.pass',
+    database: (appId) => ({ url: 'https://project.example', key: 'public-key', prefix: `a${appId}_` }),
+    tables: async () => [{ name: 'guests' }],
+    plan: async () => asked,
+    commit: async (_appId, changes) => void commits.push(changes),
+    sweep: async () => [],
+  })
+  const buildSeen = (jobId: string, withGate?: Gateway) => createPipeline({ ...cfg, BROWSER_CHECK: 'on' }, store, run, publish, withGate, open)(store.getJob(jobId)!, report)
+  const counter = (heading: string) => (workspace: string) => {
+    writeFileSync(join(workspace, 'index.html'), page(`<h1>${heading}</h1>`))
+    writeFileSync(join(workspace, 'app.js'), 'let count = 0')
+  }
+
+  beforeEach(() => {
+    opened = []
+    sees = []
+    asked = []
+    commits = []
+    store.createJob({ id: 'app1', prompt: 'a counter', ipHash: 'h', userId: 'user-anna', expiresAt: Date.now() + 240 * HOUR })
+  })
+
+  it('opens the app as it would be published, and publishes a picture of it', async () => {
+    agent = counter('Counter')
+    await buildSeen('app1')
+    expect(opened).toHaveLength(1)
+    expect(opened[0]).toMatchObject({ jobId: 'app1', base: 'https://lukasb3.github.io/app-generator-apps/apps/app1/', database: undefined, liveData: undefined })
+    // The checker's output, policy included, and the agent's files as it wrote them.
+    expect(opened[0]!.files.get('index.html')!.toString()).toContain('Content-Security-Policy')
+    expect(opened[0]!.sources.get('index.html')).toBe(page('<h1>Counter</h1>'))
+    expect(published[0]!.files.get('preview.png')).toBe(picture)
+    expect(notes).toEqual([])
+    expect(runs).toHaveLength(1)
+  })
+
+  it('is not asked at all when it is switched off', async () => {
+    agent = counter('Counter')
+    await build('app1')
+    expect(opened).toEqual([])
+    expect(published[0]!.files.has('preview.png')).toBe(false)
+    expect(notes).toEqual([])
+  })
+
+  it('sends its findings to the agent once, and publishes the repaired app', async () => {
+    sees = [found('The page shows "Total: undefined" when it loads.')]
+    agent = (workspace, job) => counter(job.problems ? 'Repaired' : 'Broken')(workspace)
+    await buildSeen('app1')
+    expect(runs).toHaveLength(2)
+    expect(runs[1]!.problems).toEqual(['The page shows "Total: undefined" when it loads.'])
+    expect(opened).toHaveLength(2)
+    expect(published[0]!.html).toContain('Repaired')
+    expect(notes).toEqual(['The browser check found problems, asking the agent to fix them'])
+    expect(readFileSync(stored('app1', 'index.html'), 'utf8')).toContain('Repaired')
+  })
+
+  it('publishes the repaired app when findings remain but are fewer, and says so', async () => {
+    sees = [found('one', 'two'), found('two')]
+    agent = (workspace, job) => counter(job.problems ? 'Repaired' : 'Broken')(workspace)
+    await buildSeen('app1')
+    expect(runs).toHaveLength(2)
+    expect(published[0]!.html).toContain('Repaired')
+    expect(notes).toEqual(['The browser check found problems, asking the agent to fix them', 'The browser check still has findings; the app is published as it is'])
+  })
+
+  it.each([
+    ['leaves as many findings', (workspace: string) => counter('Repaired')(workspace), [found('one'), found('other')]],
+    ['breaks a rule', (workspace: string) => counter('Repaired</h1><script>alert(1)</script><h1>')(workspace), [found('one')]],
+    [
+      'ends with the agent giving up',
+      () => {
+        throw new AgentError('the agent declined')
+      },
+      [found('one')],
+    ],
+  ])('keeps the first version when the repair %s', async (_name, repair, looks) => {
+    sees = looks
+    agent = (workspace, job) => (job.problems ? repair(workspace) : counter('First')(workspace))
+    expect(await buildSeen('app1')).toBe('https://apps.example/apps/app1/')
+    expect(runs).toHaveLength(2)
+    expect(published[0]!.html).toContain('First')
+    expect(published[0]!.files.get('preview.png')).toBe(picture)
+    expect(readFileSync(stored('app1', 'index.html'), 'utf8')).toContain('First')
+    expect(notes).toEqual(['The browser check found problems, asking the agent to fix them', 'The browser check still has findings; the app is published as it is'])
+  })
+
+  it('creates the tables the published version asked for, not those of a repair that was set aside', async () => {
+    sees = [found('one')]
+    agent = (workspace, job) => {
+      // The repair asks for a second table and then breaks a rule.
+      asked = job.problems ? [table, { ...table, table: 'more' }] : [table]
+      writeFileSync(join(workspace, 'index.html'), page(job.problems ? '<script>alert(1)</script>' : '<h1>First</h1>'))
+      writeFileSync(join(workspace, 'app.js'), 'let count = 0')
+    }
+    await buildSeen('app1', gate())
+    expect(commits).toEqual([[table]])
+    expect(published[0]!.html).toContain('First')
+  })
+
+  it('gives the checker and itself one repair round between them', async () => {
+    // The first version breaks a rule, so the browser never sees it. The repaired one has findings: no second round.
+    sees = [found('one')]
+    agent = (workspace, job) => counter(job.problems ? 'Repaired' : 'Broken</h1><script>alert(1)</script><h1>')(workspace)
+    await buildSeen('app1')
+    expect(runs).toHaveLength(2)
+    expect(runs[1]!.problems![0]).toContain('inline <script> is not allowed')
+    expect(opened).toHaveLength(1)
+    expect(published[0]!.html).toContain('Repaired')
+    expect(notes).toEqual(['The checker found problems, asking the agent to fix them', 'The browser check still has findings; the app is published as it is'])
+  })
+
+  it('still fails a build that breaks the rules twice, whatever a browser would say', async () => {
+    agent = counter('Broken</h1><script>alert(1)</script><h1>')
+    await expect(buildSeen('app1')).rejects.toThrow('inline <script> is not allowed')
+    expect(opened).toEqual([])
+    expect(published).toEqual([])
+  })
+
+  it('lets the build go on when it cannot run, and says so', async () => {
+    sees = [NOT_SEEN]
+    agent = counter('Counter')
+    expect(await buildSeen('app1')).toBe('https://apps.example/apps/app1/')
+    expect(runs).toHaveLength(1)
+    expect(published[0]!.files.has('preview.png')).toBe(false)
+    expect(notes).toEqual(['The browser check could not run'])
+  })
+
+  it('publishes no picture that is too large', async () => {
+    sees = [{ ...clean, pictures: new Map([['phone', Buffer.alloc(300_001)]]) }]
+    agent = counter('Counter')
+    await buildSeen('app1')
+    expect(published[0]!.files.has('preview.png')).toBe(false)
+  })
+
+  it('tells the browser where the app finds its tables and live data, and which tables there are', async () => {
+    cfg = { ...cfg, API_ORIGIN: 'https://api.example' }
+    asked = [table]
+    agent = (workspace) => {
+      writeFileSync(join(workspace, 'index.html'), '<!doctype html><html><head><title>t</title></head><body><script src="lib/db.js"></script><script src="lib/data.js"></script><script src="app.js"></script></body></html>')
+      writeFileSync(join(workspace, 'app.js'), 'db.table("entries").list()')
+    }
+    store.setHasDb('app1')
+    await buildSeen('app1', gate())
+    expect(opened[0]).toMatchObject({ database: { url: 'https://project.example', prefix: 'aapp1_', tables: ['guests', 'entries'] }, liveData: 'https://api.example/api/data/' })
+    // The key is public, and still not the browser's business.
+    expect(opened[0]!.database).not.toHaveProperty('key')
   })
 })
