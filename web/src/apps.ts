@@ -57,6 +57,21 @@ const appRow = (app: OwnedApp, now: number, change: (app: OwnedApp, row: HTMLLIE
     }
   }
   row.append(el('p', app.prompt, 'what'), state)
+  // The picture the server took of the published build. It joins the row once
+  // it has loaded, so an app without one looks as it always did.
+  if (app.url && app.currentJobId && (app.status === 'done' || app.status === 'failed')) {
+    const shot = el('a', '', 'shot')
+    shot.href = `${app.url}?v=${app.currentJobId}`
+    shot.target = '_blank'
+    shot.rel = 'noopener'
+    const picture = el('img')
+    picture.alt = 'This app, as a phone shows it'
+    picture.width = 390
+    picture.height = 844
+    picture.addEventListener('load', () => row.append(shot))
+    picture.src = `${app.url}preview.png?v=${app.currentJobId}`
+    shot.append(picture)
+  }
   return row
 }
 
