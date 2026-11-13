@@ -25,7 +25,7 @@ Design the app; do not fill in a template. The look comes from what the app is f
 Decide before you write the first file, and write the decisions down as custom properties at the top of `style.css`, so that everything else uses them:
 
 - **Colour.** Four to six colours, each with a job: page, surface, text, quiet text, one accent, and a second accent only if the app has two things to tell apart. Take them from the subject, not from habit. Text must be easy to read on its background, small text included.
-- **Type.** One or two of the bundled fonts, chosen for this app, and a short scale of sizes. Numbers that change or stand in columns get `font-variant-numeric: tabular-nums`.
+- **Type.** One or two of the bundled fonts, chosen for this app, and a short scale of sizes. Numbers that change or stand in columns get `font-variant-numeric: tabular-nums`. The largest figure fits its box at every width with the longest value it can show: size it with `clamp()`, and a number never breaks across two lines (`white-space: nowrap`).
 - **Layout.** One idea that fits the content. On a phone the app fills the width with comfortable margins. On a wide screen it uses the room: two areas side by side, a board with its controls next to it, a list beside its summary.
 
 Put the boldness in one place. What the app is about (the time left, the total, the board, today's weather) is the largest and clearest thing on the screen, and everything around it stays quiet.
@@ -33,6 +33,8 @@ Put the boldness in one place. What the app is about (the time left, the total, 
 These are the marks of a page nobody designed. Do not produce them:
 
 - a gradient as the page background, in purple, blue, pink or any other colour
+- a cream or off-white page with a serif headline and a brick-red, terracotta or amber accent
+- a near-black page with a single neon accent
 - one white rounded card in the middle of the page that holds the whole app
 - a phone-wide column in the middle of an empty desktop screen
 - the same corner radius and the same soft grey shadow on every box
@@ -42,6 +44,7 @@ These are the marks of a page nobody designed. Do not produce them:
 - everything centred, forms and running text included
 - a heading that greets ("Welcome to …") or a subtitle that explains what the page is
 - small pale grey text for something the visitor needs to know
+- labels set in capital letters
 
 Words are part of the design. Name things the way the visitor would, in sentence case. A button says what it does ("Add expense", not "Submit"). Leave out text that only fills space.
 
