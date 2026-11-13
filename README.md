@@ -86,6 +86,16 @@ npm run dev       # expects the API on http://localhost:8787
 
 The tests cover the parts that carry the security claims: what the checker rejects, what the proxy refuses to forward, the limits of the API, the flags the two containers are started with, what is accepted from the browser container, and what the database gateway's role and a visitor can and cannot do in a real Postgres. CI also runs the browser check for real, under gVisor, against the apps in `render/fixtures`.
 
+### Measuring the agent
+
+```sh
+node dist/eval.js --variant baseline --reps 2   # on the server, as the service user, with orchestrator.env loaded
+```
+
+This builds the 16 requests in `orchestrator/evals/cases.json` with the real pipeline: the same agent, key proxy, checker and browser check as the website. Nothing is published and no table is created, and the builds count against none of the site's limits. For every build it writes down whether an app came out, whether that took the repair round, what the browser check found, how long each step took, what it cost as the key proxy counted it, and which model answered, and it keeps the app with a picture of it at phone and desktop size.
+
+A change to the instructions or the model is a second variant (`v1`, `v2`, …) over the same requests. The numbers are compared directly; for looks, a person sees the pictures of both variants side by side without being told which is which.
+
 ## Deployment
 
 On a fresh Ubuntu 24.04 or 26.04 server:
