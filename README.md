@@ -61,7 +61,7 @@ The full reasoning, including the trade-offs that remain, is in [docs/threat-mod
 | `web/` | The website: Vite, TypeScript, no framework. Deployed to Vercel. |
 | `orchestrator/` | API, queue, sandbox runner, checker, publisher and the key proxy (Node 22, TypeScript, Fastify, built-in SQLite). |
 | `dbgate/` | The database gateway: creates and removes the tables of generated apps (Node 22, TypeScript, `pg`). |
-| `sandbox/` | Image for the agent container, its system prompt and the bundled libraries. |
+| `sandbox/` | Image for the agent container, its system prompt and the bundled libraries and fonts. |
 | `render/` | Image for the browser check: a pinned headless Chromium, its driver, the stand-ins it answers with and small apps to test it on. |
 | `infra/` | Provisioning and deploy scripts, sandbox launcher, Caddy config, systemd unit, compose file, database setup. |
 
@@ -138,4 +138,4 @@ Accounts are optional. They need a Supabase project with e-mail login, its own S
 
 Dollar budgets count what finished jobs have cost, so jobs that are still waiting or running can take a total past its budget, each by at most the cap for one job.
 
-Generated apps can load five bundled libraries and nothing else from outside their own files: a QR code generator, Chart.js, Preact with htm, and the project's own clients for an app's tables and for live data. They are listed in [sandbox/libs/README.md](sandbox/libs/README.md).
+Generated apps can load six bundled libraries and five bundled fonts, and nothing else from outside their own files: a QR code generator, Chart.js, Preact with htm, a set of line icons, the project's own clients for an app's tables and for live data, and the font families Inter, Space Grotesk, Fraunces, JetBrains Mono and Nunito. They are listed in [sandbox/libs/README.md](sandbox/libs/README.md).
