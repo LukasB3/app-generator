@@ -6,7 +6,7 @@
 - The model follows the attacker's instructions completely. The system prompt is a quality measure, not a control.
 - The attacker knows this repository.
 
-The goal is that under these assumptions the attacker gains nothing beyond a static page that passed the checker, with at most three small public tables behind it.
+The goal is that under these assumptions the attacker gains nothing beyond a static page that passed the checker, with at most three small public tables behind it and one picture of that page next to it.
 
 ## What is worth protecting
 
@@ -27,12 +27,13 @@ The goal is that under these assumptions the attacker gains nothing beyond a sta
 2. **Orchestrator → launcher → sandbox.** The orchestrator cannot talk to Docker. It hands a job id, a job token and the prompt to a root-owned launcher, which starts the container with fixed settings. Exactly four things reach the container: the prompt on stdin, two tokens in the environment (one for the key proxy, one for the database gateway's tools), and a workspace. The workspace holds the bundled libraries and, when an existing app is being changed, that app's files as they last passed the checker. The agent's command line is fixed in the image.
 3. **Sandbox → key proxy.** The only network path from the sandbox to the outside world. The proxy treats the container as hostile.
 4. **Sandbox → database gateway.** The second and last address a sandbox can reach. The agent has three tools there, and all they do is have the gateway write down which tables the job's app should get.
-5. **Sandbox → orchestrator (the workspace).** Whatever the agent wrote is hostile data. It is read by the checker and never executed on the server.
-6. **Orchestrator → GitHub.** Git runs with a deploy key scoped to one repository and a pinned host key.
-7. **Orchestrator → database gateway → database.** The gateway holds the one database login. After the checker has passed an app, the orchestrator hands the gateway the changes it wrote down for that job, and the gateway turns them into statements. Nobody sends it SQL.
-8. **Published app → visitor.** The app runs in the visitor's browser under a policy the agent cannot change.
-9. **Published app → database.** A page of an app with tables talks to the database's Data API from the visitor's browser, with a public key and the rights of an anonymous visitor.
-10. **Published app → this API → two public sources.** A page of an app with live data asks this API for the weather or for exchange rates. The API asks the source and writes its own answer.
+5. **Sandbox → orchestrator (the workspace).** Whatever the agent wrote is hostile data. It is read by the checker and never executed by the orchestrator. Its scripts run in one place on the server, behind the next boundary.
+6. **Orchestrator → launcher → browser → orchestrator.** An app that has passed the checker is opened once in a headless browser, in a second throwaway container that the same launcher starts. The app's files go in on stdin and nothing else does: the container has no network, no mount and no token. What comes back on stdout is hostile data again.
+7. **Orchestrator → GitHub.** Git runs with a deploy key scoped to one repository and a pinned host key.
+8. **Orchestrator → database gateway → database.** The gateway holds the one database login. After the checker has passed an app, the orchestrator hands the gateway the changes it wrote down for that job, and the gateway turns them into statements. Nobody sends it SQL.
+9. **Published app → visitor.** The app runs in the visitor's browser under a policy the agent cannot change.
+10. **Published app → database.** A page of an app with tables talks to the database's Data API from the visitor's browser, with a public key and the rights of an anonymous visitor.
+11. **Published app → this API → two public sources.** A page of an app with live data asks this API for the weather or for exchange rates. The API asks the source and writes its own answer.
 
 ## Threats and controls
 
@@ -69,6 +70,21 @@ HTML that passes is parsed and written out again with three additions at the ver
 The policy is the actual enforcement. With `connect-src 'none'`, `form-action 'none'` and `script-src 'self'`, a page cannot send requests anywhere or load code from elsewhere, whatever its scripts try. The checks before it exist so that a rejected app fails loudly with a reason instead of being published broken.
 
 Two kinds of page get a wider policy, each by one path. A page that loads the database library, in an app that has tables, may reach the Data API of the database. A page that loads the live data library may reach the live data routes of this API. What each opens up is described under "Data in an app's tables" and "Live data".
+
+One file is published that the checker has not read: `preview.png`, a picture of the page, written by the orchestrator (next section). The agent can neither write a file of that type nor link to one that does not exist.
+
+### The app's code runs on the server, once
+
+The checker reads files. It cannot see that a page shows "Score undefined", stops with an error or is wider than a phone. So an app that has passed the checker is opened in a headless browser before it is published, and what the browser finds goes into the one repair round the agent gets. This is the only place where generated code runs on the server, and it is built on the assumption that the page is out to break it.
+
+- **The browser has its own container, and it is handed nothing.** The launcher starts it with no network device but loopback, no mount, no token, a read-only root filesystem, all capabilities dropped, `no-new-privileges`, limits on memory, CPU and process count, and a user that owns nothing on the host. The app arrives on stdin and the report leaves on stdout. There is no credential in it to steal and no address to send one to.
+- **Three walls, not one.** The container runs under gVisor: its system calls are answered by a kernel in user space, not by the host's. Inside it, the browser's own sandbox is on, so the process that runs the page's scripts sits in separate namespaces behind a system call filter. Seen on the server: that process has its own user, process and network namespace and reports `Seccomp: 2`. In a plain container on this host the browser's sandbox cannot start and the browser refuses to run, and it is never told to go without (`--no-sandbox` is not used). No gVisor, no browser check.
+- **The page talks to stand-ins.** Every request the page makes is answered by the driver inside the container: its own files at the address it will be published at, an empty set of tables in place of the database, made-up weather and rates in place of live data. The policy the checker wrote into the page and the two bundled libraries are the real ones. Everything else fails.
+- **It ends.** The driver stops after ten seconds, the image kills it after fifteen, the orchestrator has the launcher kill the container after twenty. One browser runs at a time.
+- **What comes back is hostile data.** The report is read against a strict schema and dropped whole if it does not fit. Findings are sentences of the orchestrator's own; at most a short quote from the page stands in one, on one line. They go to the agent, which is assumed hijacked anyway, and to the log, never to the website. The pictures are not passed on: each is taken apart, must be exactly the picture that was asked for, and is written anew from its pixel rows.
+- **Nothing depends on it.** The browser check makes apps better, not safer. A page can behave one way when it is watched and another way later. An app that makes the check fail, hang or lie is published as if there were no check, and it has passed the checker either way. The check can also never fail a build: if the repair breaks a rule or leaves more findings, the first checked version is published.
+
+What remains: a way out would take a bug in the browser's sandbox, one in gVisor and one in the host's kernel or container runtime, and would find the host behind them. The browser is pinned to a release and gets no updates on its own. And the picture shows what the page chose to show. It is published next to the app, where a visitor of the app sees the same thing, and stays in the history of the apps repository like every published file.
 
 ### The attacker targets the pipeline itself
 
@@ -148,7 +164,7 @@ What remains: the name of a place is free text. A page that is out to do it coul
 
 ## Known trade-offs
 
-- **The launcher runs as root.** The orchestrator has no access to the Docker socket. It may run one root-owned script through sudo, `ag-sandbox run|kill <job-id>`, which validates the id and the job token and then starts a container whose every other setting is fixed in the script and a root-owned config file. A bug in that script would be serious, so it is short and tested. The price is that the service cannot use `NoNewPrivileges` and the systemd options that imply it.
+- **The launcher runs as root.** The orchestrator has no access to the Docker socket. It may run one root-owned script through sudo, `ag-sandbox run|render|kill <job-id>`, which validates the id and, for `run`, the job token, and then starts a container whose every other setting is fixed in the script and a root-owned config file. `render` starts the browser and takes no token. A bug in that script would be serious, so it is short and tested. The price is that the service cannot use `NoNewPrivileges` and the systemd options that imply it.
 - **Navigation cannot be blocked.** No browser policy stops a script from redirecting the top-level page. The checker rejects scripts that contain external URLs, but an obfuscated one would pass. The page could then send the visitor to another site, and carry along in the address what the visitor typed before. The policy stops requests in the background; it cannot stop the page from leaving.
 - **Shared origin on github.io.** All published apps share one origin with each other and with other project pages of the same account. They can read each other's local storage. Nothing sensitive may ever be hosted on that origin.
 - **One Supabase project for accounts and app data.** The free plan allows two projects and the other one is taken. The two kinds of data are kept apart inside the database, by schema and by role, but they share its quotas: what exhausts the project stops both.
