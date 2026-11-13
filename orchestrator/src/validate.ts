@@ -232,7 +232,7 @@ const checkCss = (file: string, source: string, known: Set<string>, problems: st
   if (/@import/i.test(source)) problems.push(`${file}: @import is not allowed, link stylesheets from the HTML`)
   for (const match of source.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
     const ref = match[2] ?? ''
-    if (/^data:(image\/(png|jpeg|gif|webp|svg\+xml)|font\/woff2)[;,]/i.test(ref) || ref.startsWith('#')) continue
+    if (/^data:image\/(png|jpeg|gif|webp|svg\+xml)[;,]/i.test(ref) || ref.startsWith('#')) continue
     let target: string | null = null
     try {
       target = localTarget(file, ref)
