@@ -30,7 +30,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 const launch = (args: string[], input = '') =>
-  spawnSync(LAUNCHER, args, { input, encoding: 'utf8', env: { PATH: process.env.PATH, PG_DOCKER: join(dir, 'docker'), PG_SANDBOX_CONF: join(dir, 'sandbox.conf') } })
+  spawnSync(LAUNCHER, args, { input, encoding: 'utf8', env: { PATH: process.env.PATH, PG_DOCKER: join(dir, 'docker'), PG_SANDBOX_CONF: join(dir, 'sandbox.conf'), PG_TRIAL_CONF: join(dir, 'sandbox-trial.conf') } })
 
 describe('ag-sandbox run', () => {
   it('starts a locked-down container and keeps the tokens off the command line', () => {
@@ -100,6 +100,63 @@ describe('ag-sandbox run', () => {
     symlinkSync('/etc', join(dir, 'jobs', OTHER))
     expect(launch(['run', OTHER], `${token(OTHER)}\n-\nprompt`).status).toBe(64)
     expect(existsSync(join(dir, 'args'))).toBe(false)
+  })
+})
+
+describe('ag-sandbox try', () => {
+  const onTrial = (text: string) => writeFileSync(join(dir, 'sandbox-trial.conf'), text)
+
+  it('starts the image and the model that are on trial, locked down like any other job', () => {
+    onTrial('IMAGE=ag-sandbox:trial\nMODEL=claude-opus-5-5\n')
+    const result = launch(['try', ID], `${token()}\n${gate()}\nBuild a clock`)
+    expect(result.status).toBe(0)
+    const args = out('args').split('\n').join(' ')
+    for (const flag of [`--name ag-job-${ID}`, '--network ag-sandbox', '--runtime runc', '--read-only', '--cap-drop ALL', '--security-opt no-new-privileges', '--pids-limit 256', '--memory 1g', '--cpus 1.5', `source=${dir}/jobs/${ID},target=/workspace`, '--env ANTHROPIC_MODEL=claude-opus-5-5'])
+      expect(args).toContain(flag)
+    expect(args.trim().endsWith('ag-sandbox:trial')).toBe(true)
+    expect(args).not.toContain('claude-sonnet-5-5')
+    expect(out('key')).toBe(token())
+    expect(out('stdin')).toBe('Build a clock')
+  })
+
+  it('takes the image and the model from the trial and nothing else', () => {
+    onTrial('IMAGE=ag-sandbox:trial\nMODEL=claude-opus-5-5\nNETWORK=host\nRUNTIME=evil\nMEMORY=64g\nPIDS=99999\nJOBS_DIR=/etc\nRUN_AS=root\nPROXY_URL=http://evil.example\n')
+    expect(launch(['try', ID], `${token()}\n-\nBuild a clock`).status).toBe(0)
+    const args = out('args').split('\n').join(' ')
+    expect(args).toContain('--network ag-sandbox')
+    expect(args).toContain('--runtime runc')
+    expect(args).toContain('--memory 1g')
+    expect(args).toContain('--pids-limit 256')
+    expect(args).toContain(`source=${dir}/jobs/${ID},target=/workspace`)
+    expect(args).toContain('ANTHROPIC_BASE_URL=http://ag-proxy:8080')
+    expect(args).toContain(`--user ${userInfo().uid}:${userInfo().gid}`)
+  })
+
+  it.each([
+    ['nothing is on trial', undefined],
+    ['the trial names no image', 'MODEL=claude-opus-5-5\n'],
+    ['the trial names no model', 'IMAGE=ag-sandbox:trial\n'],
+  ])('refuses when %s', (_name, text) => {
+    if (text) onTrial(text)
+    expect(launch(['try', ID], `${token()}\n-\nBuild a clock`).status).toBe(64)
+    expect(existsSync(join(dir, 'args'))).toBe(false)
+  })
+
+  it('refuses a trial file that is a symlink, and a token for another job', () => {
+    symlinkSync(join(dir, 'sandbox.conf'), join(dir, 'sandbox-trial.conf'))
+    expect(launch(['try', ID], `${token()}\n-\nBuild a clock`).status).toBe(64)
+    rmSync(join(dir, 'sandbox-trial.conf'))
+    onTrial('IMAGE=ag-sandbox:trial\nMODEL=claude-opus-5-5\n')
+    expect(launch(['try', ID], `${token(OTHER)}\n-\nBuild a clock`).status).toBe(64)
+    expect(existsSync(join(dir, 'args'))).toBe(false)
+  })
+
+  it('leaves a plain run on the website\'s image and model while something is on trial', () => {
+    onTrial('IMAGE=ag-sandbox:trial\nMODEL=claude-opus-5-5\n')
+    expect(launch(['run', ID], `${token()}\n-\nBuild a clock`).status).toBe(0)
+    const args = out('args').split('\n').join(' ')
+    expect(args.trim().endsWith('ag-sandbox:latest')).toBe(true)
+    expect(args).toContain('--env ANTHROPIC_MODEL=claude-sonnet-5-5')
   })
 })
 

@@ -194,6 +194,13 @@ describe('the eval run', () => {
     expect(errors()[0]!.error).toBe('answered by claude-sonnet-5-5, not by claude-opus-5-5')
   })
 
+  it('asks for what is on trial only when told to', async () => {
+    await evaluate()
+    expect(runs[0]!.trial).toBe(false)
+    await evaluate({ variant: 'v1', trial: true })
+    expect(runs[1]!.trial).toBe(true)
+  })
+
   it('stops starting builds once the money for the run is spent', async () => {
     await evaluate({ cases: [counter, timer], reps: 3, budgetUsd: 0.15 })
     expect(runs).toHaveLength(2)

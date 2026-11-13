@@ -23,6 +23,8 @@ export interface AgentRun {
   onDatabaseWish: () => void
   // The model that answered, as the agent's stream names it.
   onModel?: (model: string) => void
+  // Start the image and model that are on trial instead of the website's. Only an eval run asks for this.
+  trial?: boolean
 }
 
 const SAFE_PATH = /^[a-z0-9][a-z0-9._/-]{0,120}$/i
@@ -69,13 +71,13 @@ export const framePrompt = (request: string, { edit = false, problems = [] }: { 
 
 // The orchestrator has no access to Docker. It asks a root-owned launcher to
 // start the container for a job id; the launcher fixes every other detail.
-const launcher = (cfg: Config, action: 'run' | 'kill', jobId: string) => ['-n', cfg.SANDBOX_LAUNCHER, action, jobId]
+const launcher = (cfg: Config, action: 'run' | 'try' | 'kill', jobId: string) => ['-n', cfg.SANDBOX_LAUNCHER, action, jobId]
 
 // Runs Claude Code headless inside a throwaway container and reports the files
 // it writes. Resolves when the agent finishes, rejects on failure or deadline.
 export const runAgent = (cfg: Config, job: AgentRun) =>
   new Promise<void>((resolve, reject) => {
-    const child = spawn('sudo', launcher(cfg, 'run', job.jobId), { env: { PATH: process.env.PATH }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('sudo', launcher(cfg, job.trial ? 'try' : 'run', job.jobId), { env: { PATH: process.env.PATH }, stdio: ['pipe', 'pipe', 'pipe'] })
     let timedOut = false
     let outcome: 'success' | 'error' | undefined
     let stderr = ''

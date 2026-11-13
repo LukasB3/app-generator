@@ -1,10 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { loadConfig, type Config } from '../src/config.js'
 import { DatabaseDown, type Change, type Gateway } from '../src/gate.js'
-import { createPipeline, publicError, type Reporter } from '../src/pipeline.js'
+import { createPipeline, loadLibs, publicError, type Reporter } from '../src/pipeline.js'
 import { AppGone, type PublishHooks } from '../src/publish.js'
 import { NOT_SEEN, type AppToOpen, type Seen } from '../src/render.js'
 import { AgentError, type AgentRun } from '../src/sandbox.js'
@@ -61,6 +61,29 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   rmSync(dir, { recursive: true, force: true })
+})
+
+describe('the bundled libraries', () => {
+  it('are read by their path under lib/, folders included, without what only documents them', async () => {
+    const libs = join(dir, 'libs')
+    mkdirSync(join(libs, 'fonts/inter'), { recursive: true })
+    writeFileSync(join(libs, 'chart.js'), 'chart')
+    writeFileSync(join(libs, 'fonts/inter/font.css'), 'css')
+    writeFileSync(join(libs, 'fonts/inter/inter-latin.woff2'), Buffer.from([0, 255, 1]))
+    writeFileSync(join(libs, 'fonts/inter/LICENSE.txt'), 'licence')
+    writeFileSync(join(libs, 'README.md'), 'how to add a library')
+    writeFileSync(join(libs, 'build-icons.mjs'), 'a build script')
+    writeFileSync(join(libs, '.DS_Store'), 'junk')
+    const read = await loadLibs(libs)
+    expect([...read.keys()].sort()).toEqual(['chart.js', 'fonts/inter/LICENSE.txt', 'fonts/inter/font.css', 'fonts/inter/inter-latin.woff2'])
+    expect([...read.get('fonts/inter/inter-latin.woff2')!]).toEqual([0, 255, 1])
+  })
+
+  it('are the ones in this repository', async () => {
+    const read = await loadLibs(cfg.LIBS_DIR)
+    expect([...read.keys()]).toEqual(expect.arrayContaining(['chart.js', 'data.js', 'db.js', 'preact.js', 'qrcode.js']))
+    expect(read.has('README.md')).toBe(false)
+  })
 })
 
 describe('building and changing an app', () => {
