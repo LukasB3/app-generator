@@ -99,10 +99,17 @@ export const judge = (seen: Report, sources: Map<string, string>): Seen => {
     for (const blocked of each.csp)
       problems.add(`The published page's policy blocks something the page tries when it loads (${quoted(blocked.directive, 40)}${blocked.blocked ? `, ${quoted(blocked.blocked, 80)}` : ''}). A page cannot fetch files or load anything from outside the app: keep data in a .js file.`)
     for (const path of each.missing) problems.add(`The page asks for a file that does not exist: ${quoted(path, 80)}`)
-    // Words the app means to show stand in its files as they are. A value that went missing does not.
-    for (const hit of each.odd)
-      if (hit.where === 'field' || !written.includes(quoted(hit.snippet)))
-        problems.add(`The page shows "${quoted(hit.snippet, 120)}" when it loads${hit.where === 'canvas' ? ' (drawn on a canvas)' : hit.where === 'field' ? ' (in a form field)' : ''}: a value is missing where a number or a text should be.`)
+    // Words the app means to show stand in its files as they are. A value that went missing does not,
+    // and neither does the message of an error the app caught and put on the page.
+    for (const hit of each.odd) {
+      if (hit.where !== 'field' && written.includes(quoted(hit.snippet))) continue
+      const where = hit.where === 'canvas' ? ' (drawn on a canvas)' : hit.where === 'field' ? ' (in a form field)' : ''
+      problems.add(
+        /^(undefined|NaN|\[object )/.test(hit.token)
+          ? `The page shows "${quoted(hit.snippet, 120)}" when it loads${where}: a value is missing where a number or a text should be.`
+          : `The page shows the message of a script error when it loads${where}: "${quoted(hit.snippet, 160)}". Something in the app fails behind it. Find the cause and fix it.`,
+      )
+    }
     if (each.loaded && !each.hung && each.text === 0 && picture && featureless(picture, each.badge)) problems.add('The page shows nothing when it loads: no text and no picture.')
     if (each.name === 'phone') {
       if (each.noViewport) problems.add('On a phone the page is laid out far wider than the screen. Add <meta name="viewport" content="width=device-width, initial-scale=1"> to the head.')

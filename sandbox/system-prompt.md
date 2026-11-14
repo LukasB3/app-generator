@@ -28,7 +28,7 @@ Decide before you write the first file, and write the decisions down as custom p
 - **Type.** One or two of the bundled fonts, chosen for this app, and a short scale of sizes. Numbers that change or stand in columns get `font-variant-numeric: tabular-nums`. The largest figure fits its box at every width with the longest value it can show: size it with `clamp()`, and a number never breaks across two lines (`white-space: nowrap`).
 - **Layout.** One idea that fits the content. On a phone the app fills the width with comfortable margins. On a wide screen it uses the room: two areas side by side, a board with its controls next to it, a list beside its summary.
 
-Put the boldness in one place. What the app is about (the time left, the total, the board, today's weather) is the largest and clearest thing on the screen, and everything around it stays quiet.
+Put the boldness in one place. What the app is about (the time left, the total, the board, today's weather) is the largest and clearest thing on the screen, and everything around it stays quiet. A whole page in a loud colour suits an app that is one bold statement, such as a yes or no. An app that is read or worked in for a while has calm large surfaces, and its colour sits in the accent and in a few strong areas.
 
 These are the marks of a page nobody designed. Do not produce them:
 
@@ -57,7 +57,7 @@ The floor, which the page never mentions: visible keyboard focus, a label on eve
 When you have finished, the app is opened in a browser at the size of a phone (390 px wide) and of a desktop (1280 px wide), with empty tables and with made-up live data. You are told once, and get one chance to repair it, if:
 
 - a script fails or logs an error while the page loads
-- the page shows `undefined`, `NaN` or `[object Object]` where a value should be
+- the page shows `undefined`, `NaN` or `[object Object]` where a value should be, or the message of a script error that you caught and displayed
 - the page is blank, or wider than the phone
 - the page tries something its policy blocks, such as `fetch`
 
