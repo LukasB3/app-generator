@@ -28,7 +28,7 @@ flowchart LR
 
 1. The website sends the prompt and a Turnstile token to the orchestrator.
 2. The orchestrator applies the limits and has a small model screen the prompt: gibberish, abusive requests and requests that carry personal data are turned away with a message before anything is queued. Then it queues the job and streams progress back (`queued → preparing → coding → checking → publishing → done`), including the files the agent writes and a note when a database is asked for or set up, or live data is allowed.
-3. For each job a fresh container starts with a workspace that holds only the bundled libraries. The agent has the Read, Write, Edit, Glob and Grep tools, and three tools of the database gateway with which it can ask for tables for the app. Asking changes nothing: the gateway checks the wish and writes it down.
+3. For each job a fresh container starts with a workspace that holds only the bundled libraries and fonts. The message that carries the request also names a colour to start from, one of sixteen, picked by the job id: left to itself the model reaches for the same few colours in app after app. The agent has the Read, Write, Edit, Glob and Grep tools, and three tools of the database gateway with which it can ask for tables for the app. Asking changes nothing: the gateway checks the wish and writes it down.
 4. When the agent stops, the checker validates the workspace. An app that passes is opened once in a headless browser, in a container of its own with no network, which reports script errors, missing values, a blank page or one that is wider than a phone. If the checker or the browser finds problems, the agent gets one repair round with the findings. Only after the app has passed the checker are the tables it asked for created, all at once.
 5. The publisher commits the checked files to `apps/<app-id>/` in a dedicated repository and waits until GitHub Pages serves them.
 6. Someone who was logged in can change their app later with another request. That is a new job on the same app: it starts from the app's files as they last passed the checker, the whole result is checked again, and it is published at the same address. Links from the page to its own files carry the id of the job that built them, because the host lets browsers keep a file for ten minutes.
@@ -95,6 +95,22 @@ node dist/eval.js --variant baseline --reps 2   # on the server, as the service 
 This builds the 16 requests in `orchestrator/evals/cases.json` with the real pipeline: the same agent, key proxy, checker and browser check as the website. Nothing is published and no table is created, and the builds count against none of the site's limits. For every build it writes down whether an app came out, whether that took the repair round, what the browser check found, how long each step took, what it cost as the key proxy counted it, and which model answered, and it keeps the app with a picture of it at phone and desktop size.
 
 A change to the instructions, the bundled libraries or the model is a second variant (`v1`, `v2`, …) over the same requests, and it is measured before the website gets it: root puts the candidate's image and model on trial in `/etc/app-generator/sandbox-trial.conf`, and `--trial` (with `--libs` for candidate libraries) has the eval run build with those while the website keeps building with its own. The numbers are compared directly; for looks, a person sees the pictures of both variants side by side without being told which is which.
+
+#### What it showed
+
+Runs of 13 and 14 November 2026, when the agent's instructions were rewritten and fonts and icons were bundled:
+
+| Variant | Built | At the first try | Median build time | Median cost | Median app size |
+| --- | --- | --- | --- | --- | --- |
+| Instructions before, Sonnet 5.5, each request twice | 32 of 32 | 32 | 25 s | $0.05 | 6.8 kB |
+| Instructions now, Sonnet 5.5, each request twice | 32 of 32 | 29 | 44 s | $0.10 | 12.8 kB |
+| Instructions now, Opus 5.5 at low effort, each request once | 16 of 16 | 13 | 58 s | $0.20 | 14.2 kB |
+
+Times are without publishing, which adds about half a minute. The builds that were not built at the first try had findings from the browser check, and the agent cleared them in its one repair round.
+
+The rates say little, since every variant built every request. What decided was the blind comparison, done by the author on the pictures of one build per request. The new instructions were preferred for 12 of the 16 requests, the old ones for 3, with 1 tie. Between the two models Sonnet 5.5 was preferred for 8 requests and Opus 5.5 for 2, with 6 ties. At its default effort Opus built the richest apps, but took two to three and a half minutes for each, past the target of two minutes for a build, so it was compared at low effort.
+
+One judge, 16 requests and one or two builds each: enough to choose between these variants, not enough to say how large the difference is.
 
 ## Deployment
 
