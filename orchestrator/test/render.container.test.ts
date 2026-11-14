@@ -51,6 +51,12 @@ describe.runIf(process.env.TEST_RENDER === '1')('the browser check, for real', {
     ])
   })
 
+  it('reports an error that the app caught and put on the page', async () => {
+    expect((await look('caught')).problems).toEqual([
+      `The page shows the message of a script error when it loads: "Could not load rates: Cannot set properties of null (setting 'textContent'). Try again later.". Something in the app fails behind it. Find the cause and fix it.`,
+    ])
+  })
+
   it('reports a page that is wider than a phone', async () => {
     expect((await look('overflows')).problems).toEqual(['On a phone (390 px wide) the page is 555 px wider than the screen and scrolls sideways. The widest elements: div.grid.'])
   })

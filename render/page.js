@@ -4,7 +4,8 @@
 // and no rule depends on it.
 ;(() => {
   const BADGE = 'AI-generated demo from App Generator'
-  const ODD = /\bundefined\b|\bNaN\b|\[object [A-Za-z]+\]/
+  // A value that went missing, or the wording of a script error that the app caught and put on the page.
+  const ODD = /\bundefined\b|\bNaN\b|\[object [A-Za-z]+\]|Cannot (?:read|set) propert(?:y|ies) of|\b(?:Type|Reference|Syntax|Range)Error:|is not a function\b(?! of\b)|is not iterable\b|is not a constructor\b|Unexpected token\b|Maximum call stack/
   const MAX_HITS = 10
   const clip = (text, max) => String(text).replace(/\s+/g, ' ').trim().slice(0, max)
 
@@ -32,8 +33,11 @@
   const hit = (where, before, text) => {
     const found = ODD.exec(text)
     if (!found) return null
-    const lead = clip(`${before} ${text.slice(0, found.index)}`, 400).split(' ').filter(Boolean).slice(-3)
-    return { where, token: found[0], snippet: clip([...lead, found[0]].join(' '), 120) }
+    // An error message is quoted with more around it: what the app said before it, and what failed.
+    const message = !/^(undefined|NaN|\[object )/.test(found[0])
+    const lead = clip(message ? text.slice(0, found.index) : `${before} ${text.slice(0, found.index)}`, 400).split(' ').filter(Boolean).slice(message ? -6 : -3)
+    const rest = message ? text.slice(found.index + found[0].length, found.index + found[0].length + 60) : ''
+    return { where, token: found[0], snippet: clip([...lead, found[0] + rest].join(' '), 160) }
   }
 
   const measure = () => {

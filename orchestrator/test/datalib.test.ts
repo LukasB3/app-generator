@@ -98,9 +98,24 @@ describe('lib/data.js', () => {
 
   it('puts a weather code into words', () => {
     const data = load()
-    expect(data.describe(0)).toEqual({ label: 'Clear sky', icon: '☀️' })
-    expect(data.describe(61)).toEqual({ label: 'Light rain', icon: '🌦️' })
+    expect(data.describe(0)).toEqual({ label: 'Clear sky', icon: '☀️', iconName: 'sun' })
+    expect(data.describe(61)).toEqual({ label: 'Light rain', icon: '🌦️', iconName: 'cloud-rain' })
     expect(data.describe('95').label).toBe('Thunderstorm')
-    for (const code of [4, -1, 'toString', '__proto__', null, undefined]) expect(data.describe(code)).toEqual({ label: 'Unknown', icon: '' })
+    for (const code of [4, -1, 'toString', '__proto__', null, undefined]) expect(data.describe(code)).toEqual({ label: 'Unknown', icon: '', iconName: 'cloud' })
+  })
+
+  it('names an icon of lib/icons.js for every weather code, with the moon at night', () => {
+    const data = load()
+    const names: string[] = []
+    runInNewContext(readFileSync(join(import.meta.dirname, '../../sandbox/libs/icons.js'), 'utf8'), { window: { set icons(value: { names: string[] }) { names.push(...value.names) } }, document: {}, console })
+    expect(names.length).toBeGreaterThan(100)
+    for (const code of [0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99, 1234]) {
+      expect(names).toContain(data.describe(code).iconName)
+      expect(names).toContain(data.describe(code, false).iconName)
+    }
+    expect(data.describe(0, false).iconName).toBe('moon')
+    expect(data.describe(2, false).iconName).toBe('cloud-moon')
+    expect(data.describe(2, true).iconName).toBe('cloud-sun')
+    expect(data.describe(61, false).iconName).toBe('cloud-rain')
   })
 })

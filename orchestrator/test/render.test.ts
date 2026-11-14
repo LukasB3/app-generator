@@ -96,6 +96,16 @@ describe('what counts as a finding', () => {
     expect(problems([phone({ odd: [{ where: 'field', token: 'undefined', snippet: 'undefined' }] })], { 'app.js': 'if (x === undefined) return' })).toHaveLength(1)
   })
 
+  it('reports the message of a script error that the app caught and put on the page', () => {
+    const shown = { where: 'text' as const, token: 'Cannot set properties of', snippet: "Could not load rates: Cannot set properties of null (setting 'textContent'). Try again later." }
+    expect(problems([phone({ odd: [shown] })], { 'app.js': 'rate.textContent = `Could not load rates: ${error.message}. Try again later.`' })).toEqual([
+      `The page shows the message of a script error when it loads: "Could not load rates: Cannot set properties of null (setting 'textContent'). Try again later.". Something in the app fails behind it. Find the cause and fix it.`,
+    ])
+    // A page that is about such messages has them in its files, word for word.
+    const taught = { where: 'text' as const, token: 'is not a function', snippet: 'TypeError: x is not a function means that' }
+    expect(problems([phone({ odd: [taught] })], { 'index.html': '<p>TypeError: x is not a function means that x was called but is no function.</p>' })).toEqual([])
+  })
+
   it('reports a page that shows nothing, and tells it from one that only draws', () => {
     const blank = { text: 0, png: picture(390, 844) }
     expect(problems([phone(blank)])).toEqual(['The page shows nothing when it loads: no text and no picture.'])

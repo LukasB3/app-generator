@@ -90,7 +90,7 @@ What remains: a way out would take a bug in the browser's sandbox, one in gVisor
 
 - **Command injection.** The prompt is never part of a command line, a path or a commit message. Subprocesses (`sudo`, `git`) are started with argument arrays. The only request-derived value used in paths is the job id, which the server generates from random bytes.
 - **Path tricks in the workspace.** Symlinks, special files, dotfiles, odd names and deep nesting are rejected before any content is read. Output paths are built from names that passed a strict pattern.
-- **Tampering with bundled libraries.** The agent's copy of `lib/` is ignored. Referenced libraries are published from the pristine copies on the server.
+- **Tampering with bundled libraries.** The agent's copy of `lib/` is ignored. Referenced libraries and fonts are published from the pristine copies on the server. A font is a folder: its stylesheet, its font files and its licence go out together. Fonts are data, and the published policy lets a page load them from its own folder only.
 - **Leaking internals through errors.** Visitors see fixed messages. Details go to the server log.
 
 ### The attacker targets the budget or the service

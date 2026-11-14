@@ -21,36 +21,37 @@
     // No live data for this page. Every call says so.
   }
 
-  // World Meteorological Organization weather codes, as the forecast uses them.
+  // World Meteorological Organization weather codes, as the forecast uses them:
+  // in words, as an emoji, and as the name of an icon in lib/icons.js.
   var WEATHER = {
-    0: ['Clear sky', '☀️'],
-    1: ['Mainly clear', '🌤️'],
-    2: ['Partly cloudy', '⛅'],
-    3: ['Overcast', '☁️'],
-    45: ['Fog', '🌫️'],
-    48: ['Freezing fog', '🌫️'],
-    51: ['Light drizzle', '🌦️'],
-    53: ['Drizzle', '🌦️'],
-    55: ['Heavy drizzle', '🌧️'],
-    56: ['Light freezing drizzle', '🌧️'],
-    57: ['Freezing drizzle', '🌧️'],
-    61: ['Light rain', '🌦️'],
-    63: ['Rain', '🌧️'],
-    65: ['Heavy rain', '🌧️'],
-    66: ['Light freezing rain', '🌧️'],
-    67: ['Freezing rain', '🌧️'],
-    71: ['Light snow', '🌨️'],
-    73: ['Snow', '🌨️'],
-    75: ['Heavy snow', '❄️'],
-    77: ['Snow grains', '🌨️'],
-    80: ['Light showers', '🌦️'],
-    81: ['Showers', '🌧️'],
-    82: ['Heavy showers', '⛈️'],
-    85: ['Light snow showers', '🌨️'],
-    86: ['Snow showers', '❄️'],
-    95: ['Thunderstorm', '⛈️'],
-    96: ['Thunderstorm with hail', '⛈️'],
-    99: ['Thunderstorm with heavy hail', '⛈️'],
+    0: ['Clear sky', '☀️', 'sun'],
+    1: ['Mainly clear', '🌤️', 'sun'],
+    2: ['Partly cloudy', '⛅', 'cloud-sun'],
+    3: ['Overcast', '☁️', 'cloudy'],
+    45: ['Fog', '🌫️', 'cloud-fog'],
+    48: ['Freezing fog', '🌫️', 'cloud-fog'],
+    51: ['Light drizzle', '🌦️', 'cloud-drizzle'],
+    53: ['Drizzle', '🌦️', 'cloud-drizzle'],
+    55: ['Heavy drizzle', '🌧️', 'cloud-drizzle'],
+    56: ['Light freezing drizzle', '🌧️', 'cloud-drizzle'],
+    57: ['Freezing drizzle', '🌧️', 'cloud-drizzle'],
+    61: ['Light rain', '🌦️', 'cloud-rain'],
+    63: ['Rain', '🌧️', 'cloud-rain'],
+    65: ['Heavy rain', '🌧️', 'cloud-rain'],
+    66: ['Light freezing rain', '🌧️', 'cloud-rain'],
+    67: ['Freezing rain', '🌧️', 'cloud-rain'],
+    71: ['Light snow', '🌨️', 'cloud-snow'],
+    73: ['Snow', '🌨️', 'cloud-snow'],
+    75: ['Heavy snow', '❄️', 'cloud-snow'],
+    77: ['Snow grains', '🌨️', 'snowflake'],
+    80: ['Light showers', '🌦️', 'cloud-rain'],
+    81: ['Showers', '🌧️', 'cloud-rain'],
+    82: ['Heavy showers', '⛈️', 'cloud-rain'],
+    85: ['Light snow showers', '🌨️', 'cloud-snow'],
+    86: ['Snow showers', '❄️', 'cloud-snow'],
+    95: ['Thunderstorm', '⛈️', 'cloud-lightning'],
+    96: ['Thunderstorm with hail', '⛈️', 'cloud-hail'],
+    99: ['Thunderstorm with heavy hail', '⛈️', 'cloud-hail'],
   }
 
   function failure(message, status) {
@@ -121,10 +122,12 @@
       return ask('history', { base: code(base), symbol: code(symbol), days: span })
     },
 
-    // A weather code in words and as a symbol: { label: 'Light rain', icon: '🌦️' }.
-    describe: function (weatherCode) {
-      var known = Object.prototype.hasOwnProperty.call(WEATHER, weatherCode) ? WEATHER[weatherCode] : ['Unknown', '']
-      return { label: known[0], icon: known[1] }
+    // A weather code in words and as a symbol: { label: 'Light rain', icon: '🌦️', iconName: 'cloud-rain' }.
+    // iconName is for icons.svg() of lib/icons.js. Pass isDay as false and a clear or partly cloudy sky gets its moon.
+    describe: function (weatherCode, isDay) {
+      var known = Object.prototype.hasOwnProperty.call(WEATHER, weatherCode) ? WEATHER[weatherCode] : ['Unknown', '', 'cloud']
+      var night = isDay === false ? { sun: 'moon', 'cloud-sun': 'cloud-moon' }[known[2]] : undefined
+      return { label: known[0], icon: known[1], iconName: night || known[2] }
     },
   }
 })()

@@ -1,4 +1,5 @@
 import { spawn, execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 import type { Config } from './config.js'
@@ -53,9 +54,32 @@ export const agentSteps = (line: string) => {
   return steps
 }
 
+// Left to itself the model reaches for the same few colours in app after app.
+// So plain code deals every new app a colour to start from, the same one
+// through its repair round. An app that is being changed keeps its own.
+const STARTING_COLOURS = [
+  'plum',
+  'cobalt blue',
+  'burnt orange',
+  'mustard yellow',
+  'teal',
+  'brick red',
+  'ink blue-black',
+  'forest green',
+  'magenta',
+  'olive',
+  'violet',
+  'coral',
+  'petrol blue',
+  'chocolate brown',
+  'crimson',
+  'slate grey with one bright accent',
+]
+export const startingColour = (jobId: string) => STARTING_COLOURS[createHash('sha256').update(jobId).digest()[0]! % STARTING_COLOURS.length]!
+
 // The request text is data. It reaches the agent on stdin, wrapped so the model
 // sees where it starts and ends, and never touches a command line.
-export const framePrompt = (request: string, { edit = false, problems = [] }: { edit?: boolean; problems?: string[] } = {}) =>
+export const framePrompt = (request: string, { edit = false, problems = [], colour }: { edit?: boolean; problems?: string[]; colour?: string } = {}) =>
   [
     edit
       ? 'This folder holds a single-page web app that was built earlier. Change it as the request below describes, and leave everything the request does not mention as it is.'
@@ -64,6 +88,7 @@ export const framePrompt = (request: string, { edit = false, problems = [] }: { 
     '<request>',
     request.replaceAll('</request', '&lt;/request'),
     '</request>',
+    ...(colour && !edit ? [`Colour to start from, unless the subject of the app has a colour of its own: ${colour}.`] : []),
     ...(problems.length
       ? ['Your work is in this folder, but the automatic checker rejected it. Fix exactly these problems and change nothing else:', ...problems.map((p) => `- ${p}`)]
       : []),
@@ -89,7 +114,7 @@ export const runAgent = (cfg: Config, job: AgentRun) =>
 
     child.stdin.on('error', () => {})
     // The first two lines are tokens for the launcher, the rest is the agent's prompt.
-    child.stdin.end(`${job.token}\n${job.gateToken}\n${framePrompt(job.request, job)}`)
+    child.stdin.end(`${job.token}\n${job.gateToken}\n${framePrompt(job.request, { ...job, colour: startingColour(job.jobId) })}`)
     child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-2000)))
 
     createInterface({ input: child.stdout }).on('line', (line) => {
