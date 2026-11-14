@@ -110,7 +110,7 @@ Times are without publishing, which adds about half a minute. The builds that we
 
 The rates say little, since every variant built every request. What decided was the blind comparison, done by the author on the pictures of one build per request. The new instructions were preferred for 12 of the 16 requests, the old ones for 3, with 1 tie. Between the two models Sonnet 5.5 was preferred for 8 requests and Opus 5.5 for 2, with 6 ties. At its default effort Opus built the richest apps, but took two to three and a half minutes for each, past the target of two minutes for a build, so it was compared at low effort.
 
-One judge, 16 requests and one or two builds each: enough to choose between these variants, not enough to say how large the difference is.
+One judge, 16 requests and one or two builds each: enough to choose between these variants, not enough to say how large the difference is. After these runs one sentence on colour was added to the instructions and the browser check learned to report an error message that an app shows itself; a run of six requests with that version built 12 of 12.
 
 ## Deployment
 
