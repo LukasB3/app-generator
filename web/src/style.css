@@ -823,10 +823,11 @@ textarea::placeholder {
   letter-spacing: -0.012em;
 }
 
+/* Made for six: one row on a wide screen, two rows of three, three rows of two on a phone. */
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
-  gap: 2rem 1.75rem;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 2rem 1.5rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -901,6 +902,12 @@ textarea::placeholder {
   color: var(--board-soft);
   cursor: default;
   text-decoration: none;
+}
+
+@media (max-width: 70rem) {
+  .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* The board's own bottom edge sits on the showcase's line. */
