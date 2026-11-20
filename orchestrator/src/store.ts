@@ -34,6 +34,22 @@ export interface OwnedApp {
   built: { seconds: number; costUsd: number } | null
 }
 
+// An app on the website's start page: what its card shows, as it was when it
+// was pinned. Kept apart from the job records, which go after 30 days.
+export interface Pinned {
+  appId: string
+  // The build that is published, and whose picture the card shows.
+  jobId: string
+  position: number
+  title: string
+  prompt: string
+  receipt: Receipt
+  pinnedAt: number
+}
+export const MAX_PINNED = 6
+export const MAX_TITLE = 40
+export class PinError extends Error {}
+
 // One visitor, known by address or by account.
 export type Who = { ipHash: string } | { userId: string }
 
@@ -98,6 +114,16 @@ const MIGRATIONS = [
   `ALTER TABLE apps ADD COLUMN hasDb INTEGER NOT NULL DEFAULT 0;`,
   // 7: the receipt of a build, as JSON. Jobs from before this step have none.
   `ALTER TABLE jobs ADD COLUMN receipt TEXT;`,
+  // 8: the apps on the start page. They stay online, with their files and tables, until they are taken off.
+  `CREATE TABLE showcase (
+     appId TEXT PRIMARY KEY,
+     jobId TEXT NOT NULL,
+     position INTEGER NOT NULL,
+     title TEXT NOT NULL,
+     prompt TEXT NOT NULL,
+     receipt TEXT NOT NULL,
+     pinnedAt INTEGER NOT NULL
+   );`,
 ]
 
 export class Store {
@@ -278,15 +304,59 @@ export class Store {
     return ids
   }
 
+  // The apps whose pages, files and tables are kept: those that have not
+  // expired, and those on the start page whatever their end.
   liveAppIds(now = Date.now()) {
-    return (this.db.prepare('SELECT id FROM apps WHERE expiresAt > ?').all(now) as { id: string }[]).map((row) => row.id)
+    return (this.db.prepare('SELECT id FROM apps WHERE expiresAt > ? UNION SELECT appId FROM showcase').all(now) as { id: string }[]).map((row) => row.id)
+  }
+
+  // Puts a published app on the start page, or brings its card up to date.
+  // Only a build with a receipt can be pinned: the card shows its figures.
+  pin({ appId, title, position }: { appId: string; title: string; position?: number }, now = Date.now()) {
+    const name = title.replace(/\s+/g, ' ').trim()
+    if (!name || name.length > MAX_TITLE) throw new PinError(`A title has 1 to ${MAX_TITLE} characters.`)
+    const app = this.getApp(appId)
+    const pinned = this.isPinned(appId)
+    if (!app || (app.expiresAt <= now && !pinned)) throw new PinError('There is no live app with this id.')
+    const first = this.getJob(appId)
+    if (!first) throw new PinError('The request this app was built from is no longer on record.')
+    const published = this.db.prepare(`SELECT id FROM jobs WHERE appId = ? AND status = 'done' AND url IS NOT NULL ORDER BY n DESC LIMIT 1`).get(appId) as { id: string } | undefined
+    const receipt = published && this.receipt(published.id)
+    if (!published || !receipt) throw new PinError('The published build of this app has no receipt: it was built before receipts were kept.')
+    const count = (this.db.prepare('SELECT count(*) AS c FROM showcase').get() as { c: number }).c
+    if (!pinned && count >= MAX_PINNED) throw new PinError(`At most ${MAX_PINNED} apps can be on the start page. Take one off first.`)
+    const last = (this.db.prepare('SELECT coalesce(max(position), 0) AS p FROM showcase WHERE appId != ?').get(appId) as { p: number }).p
+    const place = position ?? (this.db.prepare('SELECT position FROM showcase WHERE appId = ?').get(appId) as { position: number } | undefined)?.position ?? last + 1
+    this.db
+      .prepare('INSERT OR REPLACE INTO showcase (appId, jobId, position, title, prompt, receipt, pinnedAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(appId, published.id, place, name, first.prompt, JSON.stringify(receipt), now)
+    return this.showcase().find((each) => each.appId === appId)!
+  }
+
+  unpin(appId: string) {
+    return this.db.prepare('DELETE FROM showcase WHERE appId = ?').run(appId).changes > 0
+  }
+
+  isPinned(appId: string) {
+    return this.db.prepare('SELECT 1 FROM showcase WHERE appId = ?').get(appId) !== undefined
+  }
+
+  // The cards on the start page, in their order.
+  showcase(): Pinned[] {
+    const rows = this.db.prepare('SELECT appId, jobId, position, title, prompt, receipt, pinnedAt FROM showcase ORDER BY position, pinnedAt').all() as unknown as (Omit<Pinned, 'receipt'> & { receipt: string })[]
+    return rows.map((row) => ({ ...row, receipt: JSON.parse(row.receipt) as Receipt }))
+  }
+
+  // The apps on the start page that have tables, which are emptied once a day.
+  pinnedWithTables() {
+    return (this.db.prepare('SELECT s.appId AS id FROM showcase s JOIN apps a ON a.id = s.appId WHERE a.hasDb = 1 ORDER BY s.position').all() as { id: string }[]).map((row) => row.id)
   }
 
   // Prompts and visitor hashes are not kept longer than needed for limits and
   // debugging. That includes the copy made before a schema change.
   purgeOlderThan(cutoff: number) {
     this.db.prepare('DELETE FROM events WHERE jobId IN (SELECT id FROM jobs WHERE createdAt < ?)').run(cutoff)
-    this.db.prepare('DELETE FROM apps WHERE expiresAt < ?').run(cutoff)
+    this.db.prepare('DELETE FROM apps WHERE expiresAt < ? AND id NOT IN (SELECT appId FROM showcase)').run(cutoff)
     if (this.backup && existsSync(this.backup) && statSync(this.backup).mtimeMs < cutoff) rmSync(this.backup)
     return Number(this.db.prepare('DELETE FROM jobs WHERE createdAt < ?').run(cutoff).changes)
   }

@@ -14,6 +14,7 @@ import { verifyAdminToken, verifyGateToken } from './token.js'
 //   GET  /admin/plan/<job id>                 what a job's agent asked for
 //   POST /admin/commit  { appId, changes }    apply an app's changes, all or none
 //   POST /admin/sweep   { keep: [app id] }    drop the tables of all other apps
+//   POST /admin/reset   { apps: [app id] }    empty the tables of these apps
 
 const MAX_BODY_BYTES = 64_000
 
@@ -77,6 +78,11 @@ export const createServer = ({ gate, mcp, signingSecret, log = console.log }: { 
       const dropped = await gate.sweep((await readJson(req)).keep)
       if (dropped.length) log(`swept ${dropped.join(', ')}`)
       return send(res, 200, { dropped })
+    }
+    if (req.method === 'POST' && pathname === '/admin/reset') {
+      const emptied = await gate.reset((await readJson(req)).apps)
+      if (emptied.length) log(`emptied ${emptied.join(', ')}`)
+      return send(res, 200, { emptied })
     }
     send(res, 404, { error: 'not found' })
   }

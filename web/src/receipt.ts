@@ -23,6 +23,9 @@ export const duration = (seconds: number) => {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
+// "1:13", "$0.10", "Sonnet 5.5": a build in a few figures.
+export const summary = (receipt: Pick<Receipt, 'seconds' | 'costUsd' | 'model'>) => [duration(receipt.seconds.total), dollars(receipt.costUsd), ...(receipt.model ? [modelName(receipt.model)] : [])]
+
 export const dollars = (usd: number) => (usd < 0.005 ? '<$0.01' : `$${usd.toFixed(2)}`)
 
 // "48k", "1.2k", "940"

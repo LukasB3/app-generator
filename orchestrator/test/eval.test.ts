@@ -72,6 +72,7 @@ beforeEach(() => {
       plan: async () => asked,
       commit: async (_appId, changes) => void commits.push(changes),
       sweep: async () => [],
+      reset: async () => [],
     },
     usage: async () => ({ requests: 9, input: 1200, output: 5400, cacheRead: 30_000, cacheWrite: 8000, costMicroUsd: 91_000 }),
     newId: () => `job${ids++}`,

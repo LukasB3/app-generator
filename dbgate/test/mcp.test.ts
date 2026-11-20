@@ -29,6 +29,9 @@ const gate: Gate = {
   sweep: async () => {
     throw new Error('the tools must never drop anything')
   },
+  reset: async () => {
+    throw new Error('the tools must never empty anything')
+  },
 }
 
 let time: number

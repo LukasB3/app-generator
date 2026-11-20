@@ -264,6 +264,7 @@ describe('apps with tables', () => {
       plan: async (jobId) => (log.push(`plan ${jobId}`), asked),
       commit: async (appId, changes) => void log.push(`commit ${appId} ${changes.map((change) => change.action).join(',')}`),
       sweep: async () => [],
+      reset: async () => [],
     }
     store.createJob({ id: 'app1', prompt: 'a guestbook', ipHash: 'h', userId: 'user-anna', expiresAt: Date.now() + 240 * HOUR })
   })
@@ -403,6 +404,7 @@ describe('the browser check', () => {
     plan: async () => asked,
     commit: async (_appId, changes) => void commits.push(changes),
     sweep: async () => [],
+    reset: async () => [],
   })
   const buildSeen = (jobId: string, withGate?: Gateway) => createPipeline({ ...cfg, BROWSER_CHECK: 'on' }, store, run, publish, withGate, open)(store.getJob(jobId)!, report)
   const counter = (heading: string) => (workspace: string) => {

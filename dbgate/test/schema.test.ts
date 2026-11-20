@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LIMITS, Refused, plan, type Table } from '../src/schema.js'
+import { LIMITS, Refused, emptyTables, plan, type Table } from '../src/schema.js'
 
 const APP = 'abcdefghij234567abcd'
 const guestbook = { action: 'create_table', table: 'entries', columns: [{ name: 'author', type: 'text' }, { name: 'stars', type: 'integer' }] }
@@ -124,5 +124,17 @@ describe('plan', () => {
   it('never repeats input that failed a check', () => {
     const hostile = 'x"; drop table apps.heartbeat; --'
     for (const changes of [[{ ...guestbook, table: hostile }], [{ ...guestbook, columns: [{ name: hostile, type: 'text' }] }], [{ ...guestbook, columns: [{ name: 'a', type: hostile }] }], [{ ...guestbook, mode: hostile }], [{ ...guestbook, action: hostile }]]) expect(refusal(changes)).not.toContain('drop')
+  })
+})
+
+describe('emptying an app\'s tables', () => {
+  it('deletes the rows of each table it is given, by its full name, and nothing else', () => {
+    expect(emptyTables(APP, ['cards', 'columns'])).toEqual([`delete from apps."a${APP}_cards"`, `delete from apps."a${APP}_columns"`])
+    expect(emptyTables(APP, [])).toEqual([])
+  })
+
+  it('refuses an app id or a name that is not one', () => {
+    expect(() => emptyTables('not-an-app', ['cards'])).toThrow(Refused)
+    expect(() => emptyTables(APP, ['cards"; drop table x; --'])).toThrow('not an identifier')
   })
 })

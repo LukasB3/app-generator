@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg'
-import { APP_ID, LIMITS, OWN_COLUMNS, Refused, TYPES, ident, plan, prefixOf, type ColumnType, type Limits, type Table } from './schema.js'
+import { APP_ID, LIMITS, OWN_COLUMNS, Refused, TYPES, emptyTables, ident, plan, prefixOf, type ColumnType, type Limits, type Table } from './schema.js'
 
 // The gateway cannot do its work right now: the database is out of reach, the
 // setup script has not run, or the role failed the self-test below.
@@ -13,6 +13,8 @@ export interface Gate {
   state(appId: string): Promise<{ tables: Table[]; overall: number }>
   commit(appId: string, changes: unknown): Promise<Table[]>
   sweep(keep: unknown): Promise<string[]>
+  // Deletes every row in the tables of the apps on the list and keeps the tables.
+  reset(apps: unknown): Promise<string[]>
 }
 
 // The gateway's SQL is only as harmless as the role that runs it. The role is
@@ -80,6 +82,8 @@ const tablesOf = async (db: Db, appId: string): Promise<Table[]> => {
 }
 
 const RETRY_AFTER_MS = 30_000
+// More apps than the website's start page shows at once.
+const MAX_RESET = 20
 
 export const createGate = (pool: Pool, { limits = LIMITS, log = console.log, now = Date.now }: { limits?: Limits; log?: (line: string) => void; now?: () => number } = {}): Gate => {
   // Not known until the database could be asked. Once the role has failed the test, it stays failed until a restart.
@@ -157,6 +161,19 @@ export const createGate = (pool: Pool, { limits = LIMITS, log = console.log, now
         const gone = rows.map((row) => row.name).filter((name) => !live.has(name.slice(1, 21)))
         for (const name of gone) await db.query(`drop table apps.${ident(name)}`)
         return gone
+      })
+    },
+
+    reset: async (apps) => {
+      if (!Array.isArray(apps) || apps.length > MAX_RESET || apps.some((id) => typeof id !== 'string' || !APP_ID.test(id))) throw new Refused(`"apps" is a list of at most ${MAX_RESET} app ids.`)
+      return transaction(async (db) => {
+        const emptied: string[] = []
+        for (const appId of new Set<string>(apps)) {
+          const names = (await tablesOf(db, appId)).map((table) => table.name)
+          for (const statement of emptyTables(appId, names)) await db.query(statement)
+          emptied.push(...names.map((name) => prefixOf(appId) + name))
+        }
+        return emptied
       })
     },
   }
