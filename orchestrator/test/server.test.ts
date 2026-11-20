@@ -324,6 +324,14 @@ describe('changing an app', () => {
     expect(listed).toMatchObject({ id: appId, prompt: 'my own app', currentJobId: appId, latestJobId: job.id, status: 'coding', url: 'https://apps.example/apps/x/' })
   })
 
+  it('refuses an app that is on the start page, which shows it as it was pinned', async () => {
+    const appId = await published()
+    store.pin({ appId, title: 'My own app' })
+    expect((await change(appId, 'user-anna')).json()).toEqual({ error: 'This app is shown on the start page, so it cannot be changed.' })
+    store.unpin(appId)
+    expect((await change(appId, 'user-anna')).statusCode).toBe(202)
+  })
+
   it('is for the owner alone, and tells everyone else nothing about the app', async () => {
     const appId = await published()
     expect((await change(appId)).statusCode).toBe(401)
@@ -451,6 +459,33 @@ describe('job results', () => {
     const from = async (origin: string) => (await app.inject({ url: '/api/health', headers: { origin } })).headers['access-control-allow-origin']
     expect(await from('https://app-generator.example')).toBe('https://app-generator.example')
     expect(await from('https://evil.example')).not.toBe('https://evil.example')
+  })
+})
+
+describe('the start page\'s apps', () => {
+  it('are listed for everyone, in order, with what their cards show and nothing about who built them', async () => {
+    await setup(gated)
+    expect((await app.inject({ url: '/api/showcase' })).json()).toEqual({ apps: [] })
+    const { id } = (await submit('a kanban board for a small team')).json()
+    release.shift()!()
+    await expect.poll(() => store.getJob(id)!.status).toBe('done')
+    store.pin({ appId: id, title: 'Team board' })
+
+    const res = await app.inject({ url: '/api/showcase', headers: { origin: 'https://app-generator.example' } })
+    expect(res.headers['cache-control']).toBe('public, max-age=300')
+    expect(res.headers['access-control-allow-origin']).toBe('https://app-generator.example')
+    const [card, ...more] = res.json().apps
+    expect(more).toEqual([])
+    expect(card).toMatchObject({
+      id,
+      title: 'Team board',
+      prompt: 'a kanban board for a small team',
+      url: `https://lukasb3.github.io/app-generator-apps/apps/${id}/?v=${id}`,
+      preview: `https://lukasb3.github.io/app-generator-apps/apps/${id}/preview.png?v=${id}`,
+      source: `https://github.com/LukasB3/app-generator-apps/tree/main/apps/${id}`,
+      receipt: { costUsd: 0 },
+    })
+    expect(JSON.stringify(card)).not.toMatch(/ipHash|203\.0\.113/)
   })
 })
 

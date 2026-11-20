@@ -27,7 +27,7 @@ await Promise.all(interrupted.map((id) => killContainer(cfg, id)))
 for (const name of readdirSync(jobsDir)) rmSync(join(jobsDir, name), { recursive: true, force: true })
 
 // A published app is removed when it expires, and with it the files kept for
-// changing it and its tables in the database. Job records, with the prompt
+// changing it and its tables in the database. Apps on the start page stay. Job records, with the prompt
 // and the visitor hash, are kept for 30 days for the limits and for debugging.
 const RETENTION_MS = 30 * 24 * 3_600_000
 const removeExpiredApps = createAppCleanup(cfg)
@@ -40,10 +40,21 @@ const touchSupabase = async () => {
   if (!res.ok) throw new Error(`Supabase answered ${res.status}`)
 }
 
+// The apps on the start page stay, and anyone can write into their tables.
+// Once a day, in the hour after 03:00 UTC, what strangers wrote there goes,
+// so it lives no longer there than in an app built without an account.
+const RESET_HOUR_UTC = 3
+const emptyShowcaseTables = async () => {
+  if (new Date().getUTCHours() !== RESET_HOUR_UTC) return
+  const emptied = await gate.reset(store.pinnedWithTables())
+  if (emptied.length) console.log(`emptied the tables of the start page's apps: ${emptied.join(', ')}`)
+}
+
 const purge = async () => {
   await removeExpiredApps(() => store.liveAppIds()).catch((error: unknown) => console.error('app cleanup failed', error))
   await removeSourcesExcept(cfg, store.liveAppIds()).catch((error: unknown) => console.error('removing stored sources failed', error))
   await gate.sweep(store.liveAppIds()).catch((error: unknown) => console.error('removing database tables failed', error))
+  await emptyShowcaseTables().catch((error: unknown) => console.error('emptying the tables of the start page\'s apps failed', error))
   store.purgeOlderThan(Date.now() - RETENTION_MS)
   await touchSupabase().catch((error: unknown) => console.error('Supabase keep-alive failed', error))
 }

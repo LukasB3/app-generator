@@ -32,6 +32,7 @@ flowchart LR
 4. When the agent stops, the checker validates the workspace. An app that passes is opened once in a headless browser, in a container of its own with no network, which reports script errors, missing values, a blank page or one that is wider than a phone. If the checker or the browser finds problems, the agent gets one repair round with the findings. Only after the app has passed the checker are the tables it asked for created, all at once.
 5. The publisher commits the checked files to `apps/<app-id>/` in a dedicated repository and waits until GitHub Pages serves them. The finished build comes with a receipt: how long each step took, the model, the tokens and what they cost as the key proxy counted them, the agent's tool calls, the files and bundled libraries that went out, and a link to the published files. It holds numbers only, never the request.
 6. Someone who was logged in can change their app later with another request. That is a new job on the same app: it starts from the app's files as they last passed the checker, the whole result is checked again, and it is published at the same address. Links from the page to its own files carry the id of the job that built them, because the host lets browsers keep a file for ten minutes.
+7. A few finished apps are shown on the start page, with the figures from their receipts and a button that puts their request into the form. The author puts them there with a command on the server (below); there is no route for it. An app on the start page stays online with its files and tables until it is taken off, cannot be changed meanwhile, and its tables are emptied once a day, since anyone can write into them.
 
 ## Security model
 
@@ -48,7 +49,7 @@ flowchart LR
 | Nonsense, abusive requests, personal data | One short classification call (Claude Haiku 5.5, through the key proxy with a job token) before a job is queued. It is a courtesy filter, not a boundary: its answer is one of four fixed values, and a prompt that fools it only reaches the sandbox and the checker like any other. Personal data it misses is built like any other text, so the rules still forbid sending it. If the call fails, the request goes through. |
 | Accounts | Logging in is optional and done by e-mail through Supabase Auth: no passwords, a link and a code. The orchestrator checks each login token against the project's public keys (algorithm, issuer and audience pinned) and takes only the account id from it, so it holds no Supabase secret. A token that does not verify is refused, never treated as "not logged in". An account is free to create, so it raises no limit: jobs are counted by address and by account. What it changes is how long an app stays online, and that its owner can change it. For everyone else the change route answers as if the app did not exist. An account that is not used for 90 days is deleted by a job inside the database. |
 | Agent goes for the database | It never touches it. Its three tools reach a gateway that accepts "create a table" and "add a column", checks names, types and limits, and writes the wish down. The orchestrator has the wishes applied in one transaction after the checker has passed the app, so a rejected app leaves nothing behind. The gateway builds every statement itself and logs in as a role with rights on one schema and no way to the accounts, which it checks about itself before it does any work. That role's password is made on the server and reaches the database only as a SCRAM verifier. |
-| Data in an app's tables | It is public, and the app says so on the page: every visitor can read all rows and add rows, and in tables made for it change and delete them. Row level security and explicit grants fix that per table when it is created; logged-in accounts get nothing extra. A trigger caps a table at 500 rows and a row at 2 kB, an app gets three tables, and tables are dropped with their app. A page can therefore store what a visitor types where others can read it. Apps must not ask for anything private, and the checker rejects password and card fields as before. |
+| Data in an app's tables | It is public, and the app says so on the page: every visitor can read all rows and add rows, and in tables made for it change and delete them. Row level security and explicit grants fix that per table when it is created; logged-in accounts get nothing extra. A trigger caps a table at 500 rows and a row at 2 kB, an app gets three tables, and tables are dropped with their app. The tables of an app on the start page are emptied every day. A page can therefore store what a visitor types where others can read it. Apps must not ask for anything private, and the checker rejects password and card fields as before. |
 | Live data | An app can show the weather and exchange rates. It asks this API, which knows four fixed questions with typed parameters, builds the address of the source itself, follows no redirect, and writes its own answer from the fields it expects. Only a page that loads the library for it may send requests there, and the API answers published apps on these routes only. Requests are limited per address and per day. |
 | Abuse and cost | Turnstile, per-visitor and global hourly/daily limits, a bounded queue, at most two jobs at a time, a hard timeout that kills the container. What each job cost is stored, and new jobs are turned away once a visitor's day, the day or the month has used its budget. The spend limit on the dedicated Anthropic workspace is the outer bound. |
 
@@ -134,6 +135,17 @@ The database gateway is optional as well: without it apps keep their data in the
 
 Accounts are optional. They need a Supabase project with e-mail login, its own SMTP provider and Turnstile as captcha. Set `SUPABASE_URL` and `SUPABASE_KEY` (the publishable key) in `orchestrator.env`, and `VITE_SUPABASE_URL`, `VITE_SUPABASE_KEY` and `VITE_TURNSTILE_LOGIN_SITEKEY` for the website, and add the project's `/auth/v1/` address to `connect-src` in `web/vercel.json`. Without these settings nobody can log in and everything else works the same.
 
+### The start page's apps
+
+```sh
+# on the server, as the service user, with orchestrator.env loaded
+node dist/showcase.js list
+node dist/showcase.js pin <app id> --title "Feature voting" [--position 1]
+node dist/showcase.js unpin <app id>
+```
+
+Only a published build with a receipt can be pinned. Pinning an app again brings its card up to date. An app that is taken off goes when its time is up, or within the hour if that has passed.
+
 ## Limits
 
 | Setting | Default |
@@ -147,7 +159,7 @@ Accounts are optional. They need a Supabase project with e-mail login, its own S
 | Prompt length | 1,000 characters |
 | Browser check | one at a time, 20 seconds, 768 MB; its picture of the page is published up to 300 kB |
 | App size | 30 files, 300 kB per file, 1.5 MB in total |
-| App lifetime | 1 day, or 10 days when requested from an account, then removed from the apps repository |
+| App lifetime | 1 day, or 10 days when requested from an account, then removed from the apps repository. Up to 6 apps on the start page stay until they are taken off |
 | App data | 3 tables per app with 12 columns each, 500 rows per table, 2 kB per row, 150 tables overall; dropped with the app |
 | Live data | 60 requests per address per minute; 300 lookups per visitor and 5,000 overall per day that are not answered from memory |
 | Job records | 30 days |

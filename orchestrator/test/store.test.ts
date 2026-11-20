@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Store } from '../src/store.js'
+import { MAX_PINNED, PinError, Store } from '../src/store.js'
 
 const DAY = 24 * 3_600_000
 let dir: string
@@ -63,7 +63,7 @@ describe('schema migrations', () => {
     expect(store.receipt('done1')).toBeNull()
     expect(store.receipt('fresh1')).not.toBeNull()
     store.close()
-    expect(version()).toBe(7)
+    expect(version()).toBe(8)
   })
 
   it('keeps a copy of the old file and removes it with the records it mirrors', () => {
@@ -120,7 +120,7 @@ describe('schema migrations', () => {
 
   it('leaves an up-to-date file alone and makes no copy of an empty one', () => {
     new Store(path).close()
-    expect(version()).toBe(7)
+    expect(version()).toBe(8)
     expect(existsSync(`${path}.bak`)).toBe(false)
 
     const store = new Store(path)
@@ -185,6 +185,96 @@ describe('the receipt of a build', () => {
     expect(store.appsOf('user-anna')[0]!.built).toBeNull()
     store.setCurrentJob('app1', 'app1')
     expect(store.appsOf('user-anna')[0]!.built).toEqual({ seconds: 61, costUsd: 0.12 })
+    store.close()
+  })
+})
+
+describe('the apps on the start page', () => {
+  // A published build with a receipt, as the worker leaves it.
+  const built = (store: Store, id: string, { ownerId, now = Date.now() }: { ownerId?: string; now?: number } = {}) => {
+    store.createJob({ id, prompt: `a request for ${id}`, ipHash: 'h', userId: ownerId, screenMs: 900, expiresAt: now + DAY, now })
+    store.addEvent(id, 'status', 'coding', now + 100)
+    store.setUsage(id, { requests: 3, input: 10, output: 6_000, cacheRead: 40_000, cacheWrite: 7_000, costMicroUsd: 95_000 })
+    store.setStatus(id, 'done', { url: `https://apps.example/apps/${id}/` })
+    return id
+  }
+
+  it('are pinned with a snapshot of their card, in order, and taken off again', () => {
+    const store = new Store(':memory:')
+    built(store, 'a'.repeat(20))
+    built(store, 'b'.repeat(20))
+    store.pin({ appId: 'a'.repeat(20), title: '  Team   board ' })
+    store.pin({ appId: 'b'.repeat(20), title: 'Weather', position: 0 })
+    const cards = store.showcase()
+    expect(cards.map((card) => [card.appId, card.position, card.title, card.prompt, card.jobId])).toEqual([
+      ['b'.repeat(20), 0, 'Weather', `a request for ${'b'.repeat(20)}`, 'b'.repeat(20)],
+      ['a'.repeat(20), 1, 'Team board', `a request for ${'a'.repeat(20)}`, 'a'.repeat(20)],
+    ])
+    expect(cards[1]!.receipt).toMatchObject({ costUsd: 0.095, model: null, tokens: { output: 6_000 } })
+
+    // Pinned again, a card keeps its place unless told otherwise.
+    store.pin({ appId: 'a'.repeat(20), title: 'Team board' })
+    expect(store.showcase().map((card) => card.position)).toEqual([0, 1])
+    expect(store.isPinned('a'.repeat(20))).toBe(true)
+    expect(store.unpin('a'.repeat(20))).toBe(true)
+    expect(store.unpin('a'.repeat(20))).toBe(false)
+    expect(store.showcase().map((card) => card.appId)).toEqual(['b'.repeat(20)])
+    store.close()
+  })
+
+  it('are kept with their records whatever their end, and their tables are listed for emptying', () => {
+    const store = new Store(':memory:')
+    const longAgo = Date.now() - 40 * DAY
+    built(store, 'a'.repeat(20))
+    built(store, 'c'.repeat(20))
+    store.setHasDb('a'.repeat(20))
+    store.pin({ appId: 'a'.repeat(20), title: 'Team board' })
+    store.pin({ appId: 'c'.repeat(20), title: 'Timer' })
+    // Both have expired long since: one is on the start page, one was never.
+    built(store, 'd'.repeat(20), { now: longAgo })
+    const db = (store as unknown as { db: DatabaseSync }).db
+    db.prepare('UPDATE apps SET expiresAt = ?').run(longAgo + DAY)
+
+    expect(store.liveAppIds().sort()).toEqual(['a'.repeat(20), 'c'.repeat(20)])
+    store.purgeOlderThan(Date.now() - 30 * DAY)
+    expect(store.getApp('a'.repeat(20))).toBeDefined()
+    expect(store.getApp('d'.repeat(20))).toBeUndefined()
+    expect(store.showcase()).toHaveLength(2)
+    expect(store.pinnedWithTables()).toEqual(['a'.repeat(20)])
+    store.close()
+  })
+
+  it('must be live, published with a receipt, titled, and no more than fit', () => {
+    const store = new Store(':memory:')
+    const refusal = (pin: () => unknown) => {
+      try {
+        pin()
+      } catch (error) {
+        if (error instanceof PinError) return error.message
+        throw error
+      }
+      return 'pinned'
+    }
+    expect(refusal(() => store.pin({ appId: 'x'.repeat(20), title: 'Nothing' }))).toMatch(/no live app/)
+    built(store, 'a'.repeat(20))
+    expect(refusal(() => store.pin({ appId: 'a'.repeat(20), title: ' ' }))).toMatch(/1 to 40 characters/)
+    expect(refusal(() => store.pin({ appId: 'a'.repeat(20), title: 'x'.repeat(41) }))).toMatch(/1 to 40 characters/)
+
+    // Still being built: nothing is published yet.
+    store.createJob({ id: 'b'.repeat(20), prompt: 'a clock', ipHash: 'h', expiresAt: Date.now() + DAY })
+    expect(refusal(() => store.pin({ appId: 'b'.repeat(20), title: 'Clock' }))).toMatch(/no receipt/)
+    // Built before receipts were kept.
+    store.createJob({ id: 'c'.repeat(20), prompt: 'a timer', ipHash: 'h', expiresAt: Date.now() + DAY })
+    store.setStatus('c'.repeat(20), 'done', { url: 'https://apps.example/apps/c/' })
+    ;(store as unknown as { db: DatabaseSync }).db.prepare('UPDATE jobs SET receipt = NULL WHERE id = ?').run('c'.repeat(20))
+    expect(refusal(() => store.pin({ appId: 'c'.repeat(20), title: 'Timer' }))).toMatch(/no receipt/)
+
+    const ids = 'defghi'.split('').map((letter) => built(store, letter.repeat(20)))
+    for (const id of ids) store.pin({ appId: id, title: id.slice(0, 5) })
+    expect(store.showcase()).toHaveLength(MAX_PINNED)
+    expect(refusal(() => store.pin({ appId: 'a'.repeat(20), title: 'One more' }))).toMatch(/At most 6 apps/)
+    // One that is up there can still be brought up to date.
+    expect(refusal(() => store.pin({ appId: ids[0]!, title: 'Renamed' }))).toBe('pinned')
     store.close()
   })
 })

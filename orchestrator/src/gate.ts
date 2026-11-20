@@ -4,7 +4,8 @@ import { signAdminToken, signGateToken } from './token.js'
 // The database gateway holds the only database credential on the server. The
 // orchestrator reaches it over loopback, with a pass that is good for 30
 // seconds, and never sends it SQL: only table changes that the gateway itself
-// wrote down while an agent asked for them, and the list of live apps.
+// wrote down while an agent asked for them, the list of live apps, and the
+// apps on the start page whose tables are emptied once a day.
 
 // The gateway did not do what it was asked: it is down, the database is, or it refused.
 export class DatabaseDown extends Error {}
@@ -30,6 +31,8 @@ export interface Gateway {
   commit(appId: string, changes: Change[]): Promise<void>
   // Drops the tables of every app that is not on the list. Returns their names.
   sweep(keep: Iterable<string>): Promise<string[]>
+  // Deletes every row in the tables of these apps and keeps the tables. Returns their names.
+  reset(appIds: Iterable<string>): Promise<string[]>
 }
 
 type GateConfig = Pick<Config, 'GATE_URL' | 'GATE_SIGNING_SECRET' | 'SUPABASE_URL' | 'SUPABASE_KEY'>
@@ -61,5 +64,9 @@ export const gateway = (cfg: GateConfig): Gateway => {
     plan: async (jobId) => (enabled ? (await ask<{ changes: Change[] }>('GET', `/admin/plan/${jobId}`)).changes : []),
     commit: async (appId, changes) => void (await ask('POST', '/admin/commit', { appId, changes })),
     sweep: async (keep) => (secret ? (await ask<{ dropped: string[] }>('POST', '/admin/sweep', { keep: [...keep] })).dropped : []),
+    reset: async (appIds) => {
+      const apps = [...appIds]
+      return secret && apps.length ? (await ask<{ emptied: string[] }>('POST', '/admin/reset', { apps })).emptied : []
+    },
   }
 }

@@ -24,6 +24,7 @@ const gate: Gate = {
   tables: (appId) => (calls.push(['tables', appId]), answer([])),
   commit: (appId, changes) => (calls.push(['commit', appId, changes]), answer([{ name: 'entries', mode: 'append' as const, columns: [] }])),
   sweep: (keep) => (calls.push(['sweep', keep]), answer(['abbbbbbbbbbbbbbbbbbbb_old'])),
+  reset: (apps) => (calls.push(['reset', apps]), answer([`a${APP}_cards`])),
 }
 
 let server: Server
@@ -60,6 +61,7 @@ describe('gateway routes', () => {
       expect((await call(`/admin/tables/${APP}`, { headers })).status).toBe(401)
       expect((await post('/admin/commit', { appId: APP, changes: [] }, headers)).status).toBe(401)
       expect((await post('/admin/sweep', { keep: [] }, headers)).status).toBe(401)
+      expect((await post('/admin/reset', { apps: [APP] }, headers)).status).toBe(401)
     }
     expect(calls).toEqual([])
   })
@@ -69,8 +71,9 @@ describe('gateway routes', () => {
     expect(await call(`/admin/tables/${APP}`, { headers: pass() })).toEqual({ status: 200, body: { tables: [] } })
     expect(await post('/admin/commit', { appId: APP, changes })).toEqual({ status: 200, body: { tables: [{ name: 'entries', mode: 'append', columns: [] }] } })
     expect(await post('/admin/sweep', { keep: [APP] })).toEqual({ status: 200, body: { dropped: ['abbbbbbbbbbbbbbbbbbbb_old'] } })
-    expect(calls).toEqual([['tables', APP], ['commit', APP, changes], ['sweep', [APP]]])
-    expect(logged).toEqual([`app=${APP} changed, 1 tables now`, 'swept abbbbbbbbbbbbbbbbbbbb_old'])
+    expect(await post('/admin/reset', { apps: [APP] })).toEqual({ status: 200, body: { emptied: [`a${APP}_cards`] } })
+    expect(calls).toEqual([['tables', APP], ['commit', APP, changes], ['sweep', [APP]], ['reset', [APP]]])
+    expect(logged).toEqual([`app=${APP} changed, 1 tables now`, 'swept abbbbbbbbbbbbbbbbbbbb_old', `emptied a${APP}_cards`])
   })
 
   it('answers a refusal with its sentence', async () => {
@@ -102,6 +105,7 @@ describe('gateway routes', () => {
     // The other way round: a job's pass is no admin pass.
     expect((await call(`/admin/tables/${APP}`, { headers: jobPass() })).status).toBe(401)
     expect((await post('/admin/sweep', { keep: [] }, jobPass())).status).toBe(401)
+    expect((await post('/admin/reset', { apps: [APP] }, jobPass())).status).toBe(401)
     expect((await call(`/admin/plan/${JOB}`, { headers: jobPass() })).status).toBe(401)
   })
 
@@ -131,6 +135,7 @@ describe('gateway routes', () => {
     expect((await call('/admin/tables', { headers: pass() })).status).toBe(404)
     expect((await call(`/admin/tables/${APP}/x`, { headers: pass() })).status).toBe(404)
     expect((await call('/admin/commit', { headers: pass() })).status).toBe(404)
+    expect((await call('/admin/reset', { headers: pass() })).status).toBe(404)
     expect((await call(`/admin/tables/${APP}`, { method: 'DELETE', headers: pass() })).status).toBe(404)
   })
 })

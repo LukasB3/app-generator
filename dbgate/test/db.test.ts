@@ -333,4 +333,32 @@ describe.skipIf(!url)('gateway against Postgres', () => {
       expect((await gate.tables(APP)).length).toBe(1)
     })
   })
+
+  describe('reset', () => {
+    it('empties the tables of the apps on the list and keeps the tables, their rights and their caps', async () => {
+      await gate.commit(APP, [entries, todos])
+      await gate.commit(OTHER, [entries])
+      await asAnon(`insert into ${table('entries')} (author, stars) values ('a stranger', 5)`)
+      await asAnon(`insert into ${table('todos')} (title, done) values ('scribbled', false)`)
+      await asAnon(`insert into ${table('entries', OTHER)} (author, stars) values ('someone else', 3)`)
+
+      expect(await gate.reset([APP, 'd'.repeat(20)])).toEqual([`a${APP}_entries`, `a${APP}_todos`])
+      expect((await asAnon(`select * from ${table('entries')}`)).rows).toEqual([])
+      expect((await asAnon(`select * from ${table('todos')}`)).rows).toEqual([])
+      expect((await asAnon(`select author from ${table('entries', OTHER)}`)).rows).toEqual([{ author: 'someone else' }])
+      expect((await gate.tables(APP)).map((each) => each.name)).toEqual(['entries', 'todos'])
+
+      // Visitors can write again, under the same cap.
+      await asAnon(`insert into ${table('todos')} (title, done) values ('new', false)`)
+      await expect(asAnon(`insert into ${table('todos')} (title, done) values ('${'x'.repeat(3000)}', false)`)).rejects.toThrow()
+      expect(await gate.reset([])).toEqual([])
+    })
+
+    it('refuses a list that holds anything but app ids, or too many', async () => {
+      await gate.commit(APP, [entries])
+      await asAnon(`insert into ${table('entries')} (author, stars) values ('a stranger', 5)`)
+      for (const apps of [undefined, null, APP, {}, [APP, 'x'], [7], [`${APP}"`], Array(21).fill(APP)]) await expect(gate.reset(apps)).rejects.toThrow(Refused)
+      expect((await asAnon(`select author from ${table('entries')}`)).rows).toEqual([{ author: 'a stranger' }])
+    })
+  })
 })

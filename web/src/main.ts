@@ -3,7 +3,7 @@ import './page'
 import { API, authHeader, hasLogin, timeLeft } from './account'
 import { mountCaptcha } from './captcha'
 import { account } from './header'
-import { duration, receiptItems, sourceLink, type Receipt } from './receipt'
+import { duration, receiptItems, sourceLink, summary, type Receipt } from './receipt'
 
 // Cloudflare's always-pass test key, used when no real key is configured.
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITEKEY ?? '1x00000000000000000000AA'
@@ -81,6 +81,8 @@ const setStatus = (state: 'idle' | 'screening' | 'waiting' | 'building' | 'done'
 
 const refreshSubmit = () => {
   submit.disabled = busy && !finished
+  // A card's request cannot go into the field while a build is running.
+  document.querySelectorAll<HTMLButtonElement>('#cards button').forEach((button) => (button.disabled = busy && !finished))
   submit.textContent = finished ? 'Build another app' : busy ? 'Building…' : 'Build my app'
   $('count').textContent = prompt.value.length >= 800 ? `${prompt.value.length} / ${prompt.maxLength}` : ''
 }
@@ -365,6 +367,63 @@ document.querySelectorAll<HTMLButtonElement>('.examples button').forEach((button
     prompt.focus()
   }),
 )
+
+// The apps on the start page: proof before anyone builds. Each card offers
+// its request for a build of one's own. Everything from the server is text,
+// and an address is used only if it is one.
+interface Card {
+  id: string
+  title: string
+  prompt: string
+  url: string
+  preview: string
+  receipt: Receipt
+}
+const secure = (address: unknown) => typeof address === 'string' && /^https:\/\//.test(address)
+const card = (app: Card) => {
+  const item = el('li', '', 'card')
+  const shot = el('a', '', 'shot') as HTMLAnchorElement
+  shot.href = app.url
+  shot.target = '_blank'
+  shot.rel = 'noopener'
+  const picture = el('img') as HTMLImageElement
+  picture.alt = `${app.title}, as a phone shows it`
+  picture.width = 390
+  picture.height = 844
+  picture.loading = 'lazy'
+  picture.src = app.preview
+  shot.append(picture)
+  const open = el('a', 'Open', 'quiet') as HTMLAnchorElement
+  open.href = app.url
+  open.target = '_blank'
+  open.rel = 'noopener'
+  const like = el('button', 'Build one like it', 'quiet') as HTMLButtonElement
+  like.type = 'button'
+  like.addEventListener('click', () => {
+    // After a finished build the page starts over, so the next build is a fresh one.
+    if (finished) reset()
+    prompt.value = app.prompt
+    prompt.dispatchEvent(new Event('input'))
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    prompt.focus({ preventScroll: true })
+  })
+  const actions = el('p', '', 'actions')
+  actions.append(open, like)
+  const figures = el('p', '', 'figures')
+  figures.append(...summary(app.receipt).map((figure) => el('span', figure)))
+  item.append(shot, el('h3', app.title), figures, actions)
+  return item
+}
+const showcase = async () => {
+  const res = await fetch(`${API}/api/showcase`).catch(() => null)
+  const body: { apps?: Card[] } | null = await res?.json().catch(() => null)
+  const apps = (body?.apps ?? []).filter((app) => secure(app.url) && secure(app.preview) && typeof app.title === 'string' && typeof app.prompt === 'string' && app.receipt?.seconds)
+  if (!res?.ok || !apps.length) return
+  $('cards').replaceChildren(...apps.map(card))
+  $('showcase').hidden = false
+  refreshSubmit()
+}
+void showcase()
 
 $('copy').addEventListener('click', async () => {
   await navigator.clipboard.writeText(resultLink.dataset.address ?? resultLink.href).catch(() => {})

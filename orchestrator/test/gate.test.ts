@@ -19,6 +19,7 @@ const answers: Record<string, object> = {
   [`/admin/plan/${JOB}`]: { appId: APP, changes },
   '/admin/commit': { tables: [] },
   '/admin/sweep': { dropped: [`a${'b'.repeat(20)}_entries`] },
+  '/admin/reset': { emptied: [`a${APP}_cards`] },
 }
 
 beforeAll(async () => {
@@ -60,6 +61,16 @@ describe('gateway client', () => {
     await gate.commit(APP, changes)
     expect(seen.map((request) => `${request.method} ${request.path}`)).toEqual([`GET /admin/tables/${APP}`, `GET /admin/plan/${JOB}`, 'POST /admin/commit'])
     expect(JSON.parse(seen[2]!.body)).toEqual({ appId: APP, changes })
+  })
+
+  it('has the tables of the apps on the start page emptied, and asks nothing for none', async () => {
+    const gate = full()
+    expect(await gate.reset(new Set([APP]))).toEqual([`a${APP}_cards`])
+    expect(seen.map((request) => [`${request.method} ${request.path}`, JSON.parse(request.body)])).toEqual([['POST /admin/reset', { apps: [APP] }]])
+    expect(await gate.reset([])).toEqual([])
+    expect(seen).toHaveLength(1)
+    status = 503
+    await expect(gate.reset([APP])).rejects.toThrow(DatabaseDown)
   })
 
   it('gives a job a pass for its app, and pages the place of their tables', () => {

@@ -95,6 +95,13 @@ const addColumn = (appId: string, { name, mode }: Table, column: Column) => {
   ]
 }
 
+// Empties an app's tables and keeps them: what an app on the website's start
+// page gets once a day, so that what strangers wrote there does not stay.
+export const emptyTables = (appId: string, names: string[]) => {
+  if (!APP_ID.test(appId)) throw new Refused('Unknown app.')
+  return names.map((name) => `delete from ${qualified(appId, name)}`)
+}
+
 const record = (value: unknown): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Refused('Each change is an object with an "action".')
   return value as Record<string, unknown>

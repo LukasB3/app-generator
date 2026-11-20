@@ -26,7 +26,7 @@
             <textarea id="prompt" name="prompt" rows="3" maxlength="1000" required aria-label="Describe a small web app" placeholder="Describe a small web app and get a link to it a few minutes later."></textarea>
             <div class="tools">
               <ul class="examples" aria-label="Examples">
-                <li><button type="button" data-prompt="A kanban board for a small team: three columns, cards that anyone can add, move and tick off, shared live with everyone who has the link. An empty board offers to fill itself with a few example cards.">Team board</button></li>
+                <li><button type="button" data-prompt="A feature voting board for a product team: anyone can suggest a feature in one line, every visitor can upvote each idea once, and the list sorts itself by votes, live for everyone with the link. Show the top five as a bar chart. An empty board shows five example ideas, marked as examples, with a button that adds them for real.">Feature voting</button></li>
                 <li><button type="button" data-prompt="A weather dashboard for any city with today's conditions and a chart of the next seven days">Weather dashboard</button></li>
               </ul>
               <span id="count" aria-hidden="true"></span>
@@ -93,6 +93,11 @@
         <div class="receipt" id="receipt" hidden>
           <dl aria-label="What this build took"></dl>
         </div>
+      </section>
+
+      <section class="showcase" id="showcase" aria-labelledby="showcase-title" hidden>
+        <h2 id="showcase-title">Built here</h2>
+        <ul class="cards" id="cards"></ul>
       </section>
     </main>
 

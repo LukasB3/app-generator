@@ -174,11 +174,23 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
     const owned = JOB_ID.test(req.params.id) ? store.getApp(req.params.id) : undefined
     if (!owned || owned.ownerId !== userId || owned.expiresAt <= Date.now()) return refuse(reply, 404, 'Unknown app.')
     if (!owned.currentJobId) return refuse(reply, 409, 'This app cannot be changed: it has not been published yet, or it was built before changes were possible.')
+    // The start page shows the app as it was pinned.
+    if (store.isPinned(owned.id)) return refuse(reply, 409, 'This app is shown on the start page, so it cannot be changed.')
     // A change needs time to be built, and it never moves the end of the app. The page offers a change on the same terms: more than an hour left.
     if (owned.expiresAt - Date.now() <= HOUR) return refuse(reply, 409, 'This app is removed within the hour, so it can no longer be changed.')
     if (!(await captcha(parsed.data.captchaToken, req.ip))) return refuse(reply, 403, 'The captcha check failed. Please try again.')
     return submit(req, reply, parsed.data.prompt, userId, { appId: owned.id })
   })
+
+  // The apps on the start page: what their cards show. The same for everyone, so browsers may keep it a while.
+  app.get('/api/showcase', (_req, reply) =>
+    reply.header('cache-control', 'public, max-age=300').send({
+      apps: store.showcase().map(({ appId, jobId, title, prompt, receipt }) => {
+        const url = `${cfg.APPS_BASE_URL}/apps/${appId}/`
+        return { id: appId, title, prompt, url: `${url}?v=${jobId}`, preview: `${url}preview.png?v=${jobId}`, source: `${cfg.APPS_SOURCE_URL}/apps/${appId}`, receipt }
+      }),
+    }),
+  )
 
   app.get('/api/apps', async (req, reply) => {
     const userId = await whoIs(req, reply)
