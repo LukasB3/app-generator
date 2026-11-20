@@ -9,7 +9,7 @@ import { PinError, Store } from './store.js'
 // loaded, next to the running service.
 //
 //   node dist/showcase.js list
-//   node dist/showcase.js pin <app id> --title "Team board" [--position 2]
+//   node dist/showcase.js pin <app id> --title "Feature voting" [--position 2]
 //   node dist/showcase.js unpin <app id>
 //
 // A pinned app stays online with its files and tables until it is taken off,

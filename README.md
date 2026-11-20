@@ -140,7 +140,7 @@ Accounts are optional. They need a Supabase project with e-mail login, its own S
 ```sh
 # on the server, as the service user, with orchestrator.env loaded
 node dist/showcase.js list
-node dist/showcase.js pin <app id> --title "Team board" [--position 1]
+node dist/showcase.js pin <app id> --title "Feature voting" [--position 1]
 node dist/showcase.js unpin <app id>
 ```
 
