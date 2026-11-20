@@ -68,6 +68,12 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
     captchaToken: z.string().min(1).max(4096),
   })
 
+  // What a finished build took, and where its files can be read. It holds
+  // numbers only: no prompt and nothing about the visitor.
+  const receipt = (job: Job) => {
+    const built = store.receipt(job.id)
+    return built && { ...built, source: `${cfg.APPS_SOURCE_URL}/apps/${job.appId}` }
+  }
   // `now` lets the page line its own clock up with the event timestamps.
   const view = (job: Job) => ({
     id: job.id,
@@ -77,6 +83,7 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
     error: job.error,
     expiresAt: store.getApp(job.appId)?.expiresAt ?? null,
     now: Date.now(),
+    ...(job.status === 'done' ? { receipt: receipt(job) } : {}),
   })
   const hashIp = (ip: string) => createHmac('sha256', cfg.IP_HASH_SECRET).update(clientKey(ip)).digest('hex').slice(0, 32)
   const refuse = (reply: FastifyReply, status: number, error: string) => reply.code(status).send({ error })
@@ -117,7 +124,9 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
     if (blocked) return refuse(reply, ...blocked)
 
     const id = newJobId()
+    const screening = Date.now()
     const verdict = await screen(prompt, id)
+    const screenMs = Date.now() - screening
     if (verdict !== 'ok') {
       req.log.info({ verdict }, 'prompt screened out')
       return refuse(reply, 422, SCREENED_OUT[verdict])
@@ -126,7 +135,7 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
     // Other submissions may have been queued while the screen was running.
     const blockedNow = obstacle()
     if (blockedNow) return refuse(reply, ...blockedNow)
-    store.createJob({ id, prompt, ipHash, userId, ...app })
+    store.createJob({ id, prompt, ipHash, userId, screenMs, ...app })
     worker.kick()
     return reply.code(202).send(view(store.getJob(id)!))
   }
@@ -220,8 +229,11 @@ export const buildServer = async ({ cfg, store, worker, captcha, screen, auth, d
       worker.off('queue', sendState)
     })
 
-    sendState()
+    // What happened so far comes first, so a page that opens a finished
+    // build has every note before the state that tells it the build is over.
+    // That state ends the stream, and nothing more is written after it.
     for (const event of store.events(job.id, lastSeq)) sendEvent(event)
+    sendState()
   })
 
   return app

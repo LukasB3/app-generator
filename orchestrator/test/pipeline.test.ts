@@ -1,4 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +8,7 @@ import { loadConfig, type Config } from '../src/config.js'
 import { DatabaseDown, type Change, type Gateway } from '../src/gate.js'
 import { createPipeline, loadLibs, publicError, type Reporter } from '../src/pipeline.js'
 import { AppGone, type PublishHooks } from '../src/publish.js'
+import type { BuildFacts, Usage } from '../src/receipt.js'
 import { NOT_SEEN, type AppToOpen, type Seen } from '../src/render.js'
 import { AgentError, type AgentRun } from '../src/sandbox.js'
 import { Store } from '../src/store.js'
@@ -33,7 +36,8 @@ const publish = async (appId: string, jobId: string, files: Map<string, Buffer>,
   return `https://apps.example/apps/${appId}/`
 }
 let notes: string[]
-const report: Reporter = { status: () => {}, file: () => {}, note: (text) => void notes.push(text), cost: () => {} }
+let receipts: BuildFacts[]
+const report: Reporter = { status: () => {}, file: () => {}, note: (text) => void notes.push(text), receipt: (facts) => void receipts.push(facts), usage: () => {} }
 const build = (jobId: string) => createPipeline(cfg, store, run, publish)(store.getJob(jobId)!, report)
 const stored = (appId: string, file: string) => join(cfg.DATA_DIR, 'sources', appId, file)
 
@@ -56,6 +60,7 @@ beforeEach(() => {
   runs = []
   published = []
   notes = []
+  receipts = []
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -120,6 +125,30 @@ describe('building and changing an app', () => {
     expect(existsSync(join(cfg.DATA_DIR, 'jobs', 'job2'))).toBe(false)
   })
 
+  it('reports for the receipt what the agent called, which model answered, and what goes out', async () => {
+    store.createJob({ id: 'app1', prompt: 'a chart', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
+    agent = (workspace, job) => {
+      for (const tool of ['Read', 'Glob', 'Write', 'Write', 'mcp__db__list_tables', 'Bash']) job.onTool?.(tool)
+      job.onModel?.('claude-haiku-5-5')
+      job.onModel?.('claude-sonnet-5-5')
+      job.onModel?.('claude-sonnet-5-5')
+      writeFileSync(join(workspace, 'index.html'), '<!doctype html><html><head><title>t</title><link rel="stylesheet" href="lib/fonts/inter/font.css"></head><body><script src="lib/chart.js"></script><script src="app.js"></script></body></html>')
+      writeFileSync(join(workspace, 'app.js'), 'new Chart()')
+    }
+    await build('app1')
+    const own = [...published[0]!.files].filter(([path]) => !path.startsWith('lib/'))
+    expect(receipts).toEqual([
+      {
+        model: 'claude-sonnet-5-5',
+        tools: { Read: 1, Glob: 1, Write: 2, database: 1, other: 1 },
+        files: { count: 2, bytes: own.reduce((sum, [, bytes]) => sum + bytes.length, 0) },
+        libs: ['chart.js', 'fonts/inter'],
+        repair: null,
+        browser: 'off',
+      },
+    ])
+  })
+
   it('points a page with live data at this server, if it has an address for that', async () => {
     store.createJob({ id: 'app1', prompt: 'the weather', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
     agent = (workspace) => {
@@ -135,6 +164,25 @@ describe('building and changing an app', () => {
     expect(notes).toEqual(['Live data allowed: weather and exchange rates'])
     expect(published[0]!.html).toContain('connect-src https://api.app-generator.example/api/data/;')
     expect(published[0]!.html).toContain('<meta name="app-generator-data" content="https://api.app-generator.example/api/data/">')
+  })
+
+  it('reports what the key proxy counted when the job ends, also when it fails', async () => {
+    const counted = { requests: 4, input: 10, output: 900, cacheRead: 4000, cacheWrite: 600, costMicroUsd: 52_000 }
+    const proxy = createServer((req, res) => res.end(JSON.stringify(req.url === '/v1/usage' ? counted : {})))
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+    const used: Usage[] = []
+    try {
+      store.createJob({ id: 'app1', prompt: 'a counter', ipHash: 'h', expiresAt: Date.now() + 24 * HOUR })
+      agent = () => {
+        throw new AgentError('the agent declined')
+      }
+      const pipeline = createPipeline({ ...cfg, PROXY_URL: `http://127.0.0.1:${(proxy.address() as AddressInfo).port}` }, store, run, publish)
+      await expect(pipeline(store.getJob('app1')!, { ...report, usage: (u) => void used.push(u) })).rejects.toThrow(AgentError)
+    } finally {
+      proxy.close()
+    }
+    expect(used).toEqual([counted])
+    expect(receipts).toEqual([])
   })
 
   it('keeps nothing of an app without an owner', async () => {
@@ -401,6 +449,7 @@ describe('the browser check', () => {
     expect(published[0]!.html).toContain('Repaired')
     expect(notes).toEqual(['The browser check found problems, asking the agent to fix them'])
     expect(readFileSync(stored('app1', 'index.html'), 'utf8')).toContain('Repaired')
+    expect(receipts).toEqual([expect.objectContaining({ repair: 'browser', browser: 'clean' })])
   })
 
   it('publishes the repaired app when findings remain but are fewer, and says so', async () => {
@@ -456,6 +505,7 @@ describe('the browser check', () => {
     expect(opened).toHaveLength(1)
     expect(published[0]!.html).toContain('Repaired')
     expect(notes).toEqual(['The checker found problems, asking the agent to fix them', 'The browser check still has findings; the app is published as it is'])
+    expect(receipts).toEqual([expect.objectContaining({ repair: 'checker', browser: 'findings' })])
   })
 
   it('still fails a build that breaks the rules twice, whatever a browser would say', async () => {
@@ -463,6 +513,7 @@ describe('the browser check', () => {
     await expect(buildSeen('app1')).rejects.toThrow('inline <script> is not allowed')
     expect(opened).toEqual([])
     expect(published).toEqual([])
+    expect(receipts).toEqual([])
   })
 
   it('lets the build go on when it cannot run, and says so', async () => {
@@ -472,6 +523,7 @@ describe('the browser check', () => {
     expect(runs).toHaveLength(1)
     expect(published[0]!.files.has('preview.png')).toBe(false)
     expect(notes).toEqual(['The browser check could not run'])
+    expect(receipts).toEqual([expect.objectContaining({ repair: null, browser: 'not run' })])
   })
 
   it('publishes no picture that is too large', async () => {

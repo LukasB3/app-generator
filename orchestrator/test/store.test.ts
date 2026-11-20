@@ -59,8 +59,11 @@ describe('schema migrations', () => {
     store.createJob({ id: 'fresh1', prompt: 'a new request', ipHash: 'h', expiresAt: Date.now() + DAY })
     expect(store.getJob('fresh1')!.appId).toBe('fresh1')
     expect(store.costSince(0)).toBe(0)
+    // Jobs from before receipts were kept have none; new ones do.
+    expect(store.receipt('done1')).toBeNull()
+    expect(store.receipt('fresh1')).not.toBeNull()
     store.close()
-    expect(version()).toBe(6)
+    expect(version()).toBe(7)
   })
 
   it('keeps a copy of the old file and removes it with the records it mirrors', () => {
@@ -117,7 +120,7 @@ describe('schema migrations', () => {
 
   it('leaves an up-to-date file alone and makes no copy of an empty one', () => {
     new Store(path).close()
-    expect(version()).toBe(6)
+    expect(version()).toBe(7)
     expect(existsSync(`${path}.bak`)).toBe(false)
 
     const store = new Store(path)
@@ -125,5 +128,63 @@ describe('schema migrations', () => {
     store.close()
     new Store(path).close()
     expect(existsSync(`${path}.bak`)).toBe(false)
+  })
+})
+
+describe('the receipt of a build', () => {
+  it('adds up the time of each step, a repair round included, and keeps what the build reported', () => {
+    const store = new Store(':memory:')
+    const t = 1_700_000_000_000
+    store.createJob({ id: 'job1', prompt: 'a counter', ipHash: 'h', screenMs: 812.4, expiresAt: t + DAY, now: t })
+    const steps: [string, number][] = [
+      ['preparing', 100],
+      ['coding', 400],
+      ['checking', 40_400],
+      ['coding', 46_400],
+      ['checking', 58_400],
+      ['publishing', 62_400],
+      ['done', 90_000],
+    ]
+    for (const [status, after] of steps) store.addEvent('job1', 'status', status, t + after)
+    store.addEvent('job1', 'note', 'The browser check found problems, asking the agent to fix them', t + 46_000)
+    store.addToReceipt('job1', { model: 'claude-sonnet-5-5', tools: { Read: 3, Write: 5 }, files: { count: 4, bytes: 38_000 }, libs: ['chart.js', 'fonts/inter'], repair: 'browser', browser: 'clean' })
+    store.setUsage('job1', { requests: 12, input: 2_000, output: 9_000, cacheRead: 30_000, cacheWrite: 7_000, costMicroUsd: 131_250.5 })
+
+    expect(store.receipt('job1')).toEqual({
+      seconds: { screening: 0.8, queued: 0.1, preparing: 0.3, coding: 52, checking: 10, publishing: 27.6, total: 90.8 },
+      costUsd: 0.131251,
+      tokens: { input: 2_000, output: 9_000, cacheRead: 30_000, cacheWrite: 7_000 },
+      requests: 12,
+      model: 'claude-sonnet-5-5',
+      tools: { Read: 3, Write: 5 },
+      files: { count: 4, bytes: 38_000 },
+      libs: ['chart.js', 'fonts/inter'],
+      repair: 'browser',
+      browser: 'clean',
+    })
+    expect(store.costSince(0)).toBe(131_251)
+    store.close()
+  })
+
+  it('is there for a job that has not reported anything yet, and missing for one that does not exist', () => {
+    const store = new Store(':memory:')
+    store.createJob({ id: 'job1', prompt: 'a counter', ipHash: 'h', expiresAt: Date.now() + DAY })
+    expect(store.receipt('job1')).toMatchObject({ seconds: { screening: 0, total: 0 }, costUsd: 0, tokens: null, model: null, tools: {}, files: null, libs: [], repair: null })
+    expect(store.receipt('nothing')).toBeNull()
+    store.addToReceipt('nothing', { model: 'claude-sonnet-5-5' })
+    expect(store.receipt('nothing')).toBeNull()
+    store.close()
+  })
+
+  it('gives an owner the time and cost of the build that is published', () => {
+    const store = new Store(':memory:')
+    const t = Date.now()
+    store.createJob({ id: 'app1', prompt: 'a counter', ipHash: 'h', userId: 'user-anna', screenMs: 1000, expiresAt: t + DAY, now: t })
+    store.addEvent('app1', 'status', 'done', t + 60_000)
+    store.setUsage('app1', { requests: 1, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, costMicroUsd: 120_000 })
+    expect(store.appsOf('user-anna')[0]!.built).toBeNull()
+    store.setCurrentJob('app1', 'app1')
+    expect(store.appsOf('user-anna')[0]!.built).toEqual({ seconds: 61, costUsd: 0.12 })
+    store.close()
   })
 })

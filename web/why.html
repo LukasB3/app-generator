@@ -25,7 +25,7 @@
       <p>Every app here is written by an agent that nobody supervises. A request comes in, the agent writes the code in a locked-down container, plain code checks the result, and the app goes live. The hard part in a setup like this is knowing whether the result is fine to publish when no person has reviewed it. That is handled by the infrastructure around the agent: it works in an isolated sandbox, API keys are handled carefully, every app runs through automated checks, time and cost are capped, and publishing only happens once everything passes. Agents still make mistakes, and this setup is designed to catch them before anything goes live.</p>
 
       <h2>Why only small web apps</h2>
-      <p>The generator is limited to single-page browser apps because it is meant purely as a demonstration. The small scope also keeps costs low, at well under five cents per app on average.</p>
+      <p>The generator is limited to single-page browser apps because it is meant purely as a demonstration. The small scope also keeps costs low, at about ten to fifteen cents per app.</p>
 
       <h2>What the same approach can do</h2>
       <p>With the tools available today, the same pattern already works for medium-sized applications with a database, an API, authentication, background jobs, tests and deployment. The agent would work in real repositories with CI, and the same kind of checks would decide what gets merged and shipped. Internal tools, dashboards built on existing data and business applications with user accounts and permissions are realistic projects for this kind of setup.</p>

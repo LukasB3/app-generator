@@ -30,7 +30,13 @@ describe('reading the agent\'s stream', () => {
     expect(agentSteps(JSON.stringify({ type: 'result', subtype: 'success', is_error: false })).outcome).toBe('success')
     expect(agentSteps(JSON.stringify({ type: 'result', subtype: 'success', is_error: true })).outcome).toBe('error')
     expect(agentSteps(JSON.stringify({ type: 'result', subtype: 'error_max_turns' })).outcome).toBe('error')
-    expect(agentSteps('not json')).toEqual({ files: [], askedDatabase: false })
-    expect(agentSteps('null')).toEqual({ files: [], askedDatabase: false })
+    expect(agentSteps('not json')).toEqual({ tools: [], files: [], askedDatabase: false })
+    expect(agentSteps('null')).toEqual({ tools: [], files: [], askedDatabase: false })
+  })
+
+  it('names every tool the agent calls, and nothing it only writes about', () => {
+    const line = assistant(tool('Read', { file_path: '/workspace/lib/README.md' }), { type: 'text', text: 'Now I call Write.' }, tool('Write', { file_path: '/workspace/index.html' }), tool('mcp__db__create_table'))
+    expect(agentSteps(line).tools).toEqual(['Read', 'Write', 'mcp__db__create_table'])
+    expect(agentSteps(assistant(tool('x'.repeat(500)))).tools).toEqual(['x'.repeat(60)])
   })
 })

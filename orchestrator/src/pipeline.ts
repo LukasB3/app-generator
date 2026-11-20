@@ -3,6 +3,7 @@ import { join, relative, sep } from 'node:path'
 import type { Config } from './config.js'
 import { DatabaseDown, gateway } from './gate.js'
 import { AppGone, createPublisher } from './publish.js'
+import { countCall, libraryNames, mostOften, type BuildFacts, type Tool, type Usage } from './receipt.js'
 import { NOT_SEEN, openApp, type Seen } from './render.js'
 import { AgentError, JobTimeout, killContainer, runAgent } from './sandbox.js'
 import { saveSources, seedWorkspace } from './sources.js'
@@ -14,7 +15,10 @@ export interface Reporter {
   status: (status: JobStatus) => void
   file: (path: string) => void
   note: (text: string) => void
-  cost: (microUsd: number) => void
+  // What the build did, for its receipt, once the app has passed the checks.
+  receipt: (facts: BuildFacts) => void
+  // What the job used, as the key proxy counted it. Reported last, whatever the outcome.
+  usage: (used: Usage) => void
 }
 
 export type Pipeline = (job: Job, report: Reporter) => Promise<string>
@@ -46,7 +50,7 @@ export const loadLibs = async (dir: string) => {
 // What a job has used, as the key proxy counted it: requests, tokens of each
 // kind and their price. The job's own token may have run out with its
 // deadline, so the question is asked with a fresh one.
-export const jobUsage = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string) => {
+export const jobUsage = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string): Promise<Usage> => {
   const token = signJobToken(cfg.PROXY_SIGNING_SECRET, jobId, Math.ceil(Date.now() / 1000) + 30)
   const res = await fetch(`${cfg.PROXY_URL}/v1/usage`, { headers: { 'x-api-key': token }, signal: AbortSignal.timeout(5000) })
   if (!res.ok) throw new Error(`the key proxy answered ${res.status}`)
@@ -54,7 +58,6 @@ export const jobUsage = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SE
   const count = (name: string) => Number(used[name]) || 0
   return { requests: count('requests'), input: count('input'), output: count('output'), cacheRead: count('cacheRead'), cacheWrite: count('cacheWrite'), costMicroUsd: count('costMicroUsd') }
 }
-export const jobCost = async (cfg: Pick<Config, 'PROXY_URL' | 'PROXY_SIGNING_SECRET'>, jobId: string) => (await jobUsage(cfg, jobId)).costMicroUsd
 
 // What the published picture of an app may weigh.
 const PREVIEW_MAX_BYTES = 300_000
@@ -84,8 +87,23 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
       // A line for the visitor, said once however often it happens.
       const said = new Set<string>()
       const once = (text: string) => void (said.has(text) || (said.add(text), report.note(text)))
+      // For the receipt: the tools the agent called, and the model that answered.
+      const tools: Partial<Record<Tool, number>> = {}
+      const models = new Map<string, number>()
       const agent = (problems?: string[]) =>
-        run(cfg, { jobId: job.id, request: job.prompt, edit, problems, token, gateToken, deadline, onFile: report.file, onDatabaseWish: () => once('Database requested through an MCP tool') })
+        run(cfg, {
+          jobId: job.id,
+          request: job.prompt,
+          edit,
+          problems,
+          token,
+          gateToken,
+          deadline,
+          onFile: report.file,
+          onDatabaseWish: () => once('Database requested through an MCP tool'),
+          onTool: (name) => countCall(tools, name),
+          onModel: (model) => void models.set(model, (models.get(model) ?? 0) + 1),
+        })
       const check = async () => {
         // The agent cannot touch the database. It can ask the gateway for
         // tables, and the gateway writes that down. A gateway that cannot be
@@ -130,11 +148,13 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
 
       report.status('checking')
       // The checker and the browser check share one repair round.
+      let repair: BuildFacts['repair'] = null
       let chosen = await attempt().catch((error: unknown) => {
         if (!(error instanceof ValidationError)) throw error
         return error.problems
       })
       if (Array.isArray(chosen)) {
+        repair = 'checker'
         // The app broke a rule. The agent gets one try at it, and a second failure fails the build.
         report.note('The checker found problems, asking the agent to fix them')
         report.status('coding')
@@ -142,6 +162,7 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
         report.status('checking')
         chosen = await attempt()
       } else if (chosen.seen.problems.length) {
+        repair = 'browser'
         // The app may be published as it is. Whatever the repair does, that version stands unless the new one is better.
         report.note('The browser check found problems, asking the agent to fix them')
         report.status('coding')
@@ -177,6 +198,16 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
       }
       if (uses.has('liveData')) report.note('Live data allowed: weather and exchange rates')
 
+      const own = [...chosen.checked.files].filter(([path]) => !path.startsWith('lib/'))
+      report.receipt({
+        model: mostOften(models),
+        tools,
+        files: { count: own.length, bytes: own.reduce((sum, [, bytes]) => sum + bytes.length, 0) },
+        libs: libraryNames(chosen.checked.files.keys()),
+        repair,
+        browser: cfg.BROWSER_CHECK === 'off' ? 'off' : !chosen.seen.ran ? 'not run' : chosen.seen.problems.length ? 'findings' : 'clean',
+      })
+
       report.status('publishing')
       return await publish(job.appId, job.id, files, {
         isLive: () => (apps.getApp(job.appId)?.expiresAt ?? 0) > Date.now(),
@@ -192,7 +223,7 @@ export const createPipeline = (cfg: Config, apps: Pick<Store, 'getApp' | 'setCur
     } finally {
       await killContainer(cfg, job.id)
       await rm(workspace, { recursive: true, force: true })
-      await jobCost(cfg, job.id).then(report.cost, (error: unknown) => console.error(`cost of job ${job.id} is unknown`, error))
+      await jobUsage(cfg, job.id).then(report.usage, (error: unknown) => console.error(`cost of job ${job.id} is unknown`, error))
     }
   }
 }

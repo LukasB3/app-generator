@@ -172,7 +172,7 @@ describe('POST /api/jobs', () => {
 
   it('records what the pipeline reports as the cost of a job', async () => {
     await setup(async (_job, report) => {
-      report.cost(1234.2)
+      report.usage({ requests: 3, input: 10, output: 20, cacheRead: 30, cacheWrite: 40, costMicroUsd: 1234.2 })
       return 'https://apps.example/apps/x/'
     })
     const { id } = (await submit()).json()
@@ -242,7 +242,7 @@ describe('accounts', () => {
     expect(store.getApp(anonymous.id)!.ownerId).toBeNull()
 
     const listed = (await myApps('user-anna')).json()
-    expect(listed.apps).toEqual([{ id: mine.id, prompt: 'my own app', status: 'coding', url: null, currentJobId: null, latestJobId: mine.id, createdAt: expect.any(Number), expiresAt: mine.expiresAt }])
+    expect(listed.apps).toEqual([{ id: mine.id, prompt: 'my own app', status: 'coding', url: null, currentJobId: null, latestJobId: mine.id, createdAt: expect.any(Number), expiresAt: mine.expiresAt, built: null }])
     expect(Math.abs(Date.now() - listed.now)).toBeLessThan(5000)
     expect((await myApps('user-ben')).json().apps).toEqual([])
   })
@@ -451,6 +451,70 @@ describe('job results', () => {
     const from = async (origin: string) => (await app.inject({ url: '/api/health', headers: { origin } })).headers['access-control-allow-origin']
     expect(await from('https://app-generator.example')).toBe('https://app-generator.example')
     expect(await from('https://evil.example')).not.toBe('https://evil.example')
+  })
+})
+
+describe('the receipt of a build', () => {
+  it('comes with a finished build only: numbers, the time of the screen and where the files can be read, never the request', async () => {
+    const slowScreen: PromptScreen = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      return 'ok'
+    }
+    await setup(gated, {}, slowScreen)
+    const queued = (await submit()).json()
+    expect(queued).not.toHaveProperty('receipt')
+    expect((await app.inject({ url: `/api/jobs/${queued.id}` })).json()).not.toHaveProperty('receipt')
+    release.shift()!()
+    await expect.poll(() => store.getJob(queued.id)!.status).toBe('done')
+
+    const done = (await app.inject({ url: `/api/jobs/${queued.id}` })).json()
+    expect(done.receipt).toMatchObject({ costUsd: 0, source: `https://github.com/LukasB3/app-generator-apps/tree/main/apps/${queued.id}` })
+    expect(done.receipt.seconds.screening).toBeGreaterThan(0)
+    expect(done.receipt.seconds.total).toBeGreaterThanOrEqual(done.receipt.seconds.screening)
+    expect(JSON.stringify(done.receipt)).not.toContain('tic tac toe')
+  })
+
+  it('is not given for a failed build', async () => {
+    await setup(async (_job, report) => {
+      report.receipt({ model: 'claude-sonnet-5-5' })
+      throw new Error('push failed')
+    })
+    const { id } = (await submit()).json()
+    await expect.poll(() => store.getJob(id)!.status).toBe('failed')
+    expect((await app.inject({ url: `/api/jobs/${id}` })).json()).not.toHaveProperty('receipt')
+  })
+
+  it('reaches a page that opens a finished build after every note, in the state that ends the stream', async () => {
+    await setup(async (_job, report) => {
+      report.status('coding')
+      report.status('checking')
+      report.note('The browser check found problems, asking the agent to fix them')
+      report.status('coding')
+      report.status('checking')
+      report.receipt({ model: 'claude-sonnet-5-5', repair: 'browser' })
+      report.status('publishing')
+      return 'https://apps.example/apps/x/'
+    })
+    const { id } = (await submit()).json()
+    await expect.poll(() => store.getJob(id)!.status).toBe('done')
+
+    const stream = (await app.inject({ url: `/api/jobs/${id}/events` })).payload
+    const messages = stream
+      .split('\n\n')
+      .filter((block) => block.includes('event: '))
+      .map((block) => ({ name: /event: (\w+)/.exec(block)![1], data: JSON.parse(/data: (.*)/.exec(block)![1]!) }))
+    expect(messages.map(({ name, data }) => (name === 'state' ? `state:${data.status}` : `${data.type}:${data.data}`))).toEqual([
+      'status:queued',
+      'status:coding',
+      'status:checking',
+      'note:The browser check found problems, asking the agent to fix them',
+      'status:coding',
+      'status:checking',
+      'status:publishing',
+      'status:done',
+      'state:done',
+    ])
+    expect(messages.at(-1)!.data.receipt).toMatchObject({ model: 'claude-sonnet-5-5', repair: 'browser' })
   })
 })
 

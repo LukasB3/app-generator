@@ -729,6 +729,83 @@ textarea::placeholder {
   height: auto;
 }
 
+/* At Done each step says how long it took, and the receipt under the steps
+   sums the build up. On a wide screen it keeps clear of the picture. */
+
+.took {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--pass);
+  font: 500 0.8125rem/1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+  animation: arrive 0.25s ease-out;
+}
+
+.receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 2.5rem;
+  margin-top: 0.125rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--board-line);
+  animation: arrive 0.25s ease-out;
+}
+
+.stages:has(.preview:not([hidden])):has(+ .receipt:not([hidden])) {
+  margin-bottom: 0;
+}
+
+.stages:has(.preview:not([hidden])) + .receipt {
+  min-height: calc(6.5rem * 844 / 390 + 0.625rem);
+  margin-right: 9rem;
+  align-content: flex-start;
+}
+
+.receipt dl {
+  display: grid;
+  flex: 1 1 32rem;
+  grid-template-columns: repeat(auto-fill, minmax(7.25rem, 1fr));
+  gap: 1.125rem 2rem;
+  margin: 0;
+}
+
+.receipt .wide {
+  grid-column: span 2;
+}
+
+/* Names, not figures */
+.receipt .wide dd {
+  font: 500 0.9375rem/1.4 var(--text);
+}
+
+.receipt dt {
+  color: var(--board-soft);
+  font: 500 0.8125rem/1.3 var(--text);
+}
+
+.receipt dd {
+  margin: 0.25rem 0 0;
+  color: var(--board-ink);
+  font: 500 1.0625rem/1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.receipt small {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--board-soft);
+  font: 400 0.75rem/1.3 var(--mono);
+}
+
+.receipt .source {
+  flex: none;
+  color: var(--pass);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
 /* On arrival the line is drawn once, step by step. */
 
 .intro .mark {
@@ -1152,6 +1229,15 @@ footer nav {
   .stages:has(.preview:not([hidden])) {
     margin-bottom: 0;
   }
+
+  .receipt {
+    margin-top: 1.5rem;
+  }
+
+  .stages:has(.preview:not([hidden])) + .receipt {
+    min-height: 0;
+    margin-right: 0;
+  }
 }
 
 /* Phones: everything in the bar a size smaller, and the button spans the request field */
@@ -1207,6 +1293,8 @@ footer nav {
   .intro .zone-name,
   .notes li,
   .preview,
+  .took,
+  .receipt,
   .stages li.now::after,
   .stages li.wait::after,
   .sandbox.now .zone rect {

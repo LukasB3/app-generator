@@ -2,6 +2,7 @@ import './page'
 import { accountsEnabled, API, timeLeft } from './account'
 import { mountCaptcha } from './captcha'
 import { showAccount } from './header'
+import { dollars, duration } from './receipt'
 
 // Two widgets: logging in is checked by the login provider, building by the
 // orchestrator. Cloudflare's always-pass test key stands in for a missing one.
@@ -19,6 +20,8 @@ interface OwnedApp {
   latestJobId: string
   status: 'queued' | 'preparing' | 'coding' | 'checking' | 'publishing' | 'done' | 'failed'
   expiresAt: number
+  // How long the published build took and what it cost, if it has a receipt.
+  built?: { seconds: number; costUsd: number } | null
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -48,6 +51,7 @@ const appRow = (app: OwnedApp, now: number, change: (app: OwnedApp, row: HTMLLIE
     open.target = '_blank'
     open.rel = 'noopener'
     state.append(open, el('span', `Online for another ${timeLeft(app.expiresAt, now)}`))
+    if (app.built) state.append(el('span', `Built in ${duration(app.built.seconds)} for ${dollars(app.built.costUsd)}`))
     // A change needs an hour of the app's time to be built in.
     if (app.currentJobId && app.expiresAt - now > HOUR) {
       const button = el('button', 'Change it', 'quiet')
