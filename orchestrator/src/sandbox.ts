@@ -24,6 +24,8 @@ export interface AgentRun {
   onDatabaseWish: () => void
   // The model that answered, as the agent's stream names it.
   onModel?: (model: string) => void
+  // A tool the agent called, by its name in the stream.
+  onTool?: (name: string) => void
   // Start the image and model that are on trial instead of the website's. Only an eval run asks for this.
   trial?: boolean
 }
@@ -32,9 +34,10 @@ const SAFE_PATH = /^[a-z0-9][a-z0-9._/-]{0,120}$/i
 const DATABASE_WISHES = new Set(['mcp__db__create_table', 'mcp__db__add_column'])
 
 // What one line of the agent's stream-json output says: how the run ended,
-// which files it wrote, and whether it asked the database gateway for anything.
+// which tools it called and which files it wrote, and whether it asked the
+// database gateway for anything.
 export const agentSteps = (line: string) => {
-  const steps: { outcome?: 'success' | 'error'; files: string[]; askedDatabase: boolean; model?: string } = { files: [], askedDatabase: false }
+  const steps: { outcome?: 'success' | 'error'; tools: string[]; files: string[]; askedDatabase: boolean; model?: string } = { tools: [], files: [], askedDatabase: false }
   let event: any
   try {
     event = JSON.parse(line)
@@ -46,6 +49,7 @@ export const agentSteps = (line: string) => {
   if (typeof event.message.model === 'string') steps.model = event.message.model.replace(/[^a-z0-9.-]/gi, '').slice(0, 60)
   for (const block of event.message.content) {
     if (block?.type !== 'tool_use') continue
+    steps.tools.push(String(block.name ?? '').slice(0, 60))
     if (DATABASE_WISHES.has(block.name)) steps.askedDatabase = true
     if (!['Write', 'Edit'].includes(block.name)) continue
     const path = String(block.input?.file_path ?? '').replace(/^\/workspace\//, '')
@@ -120,6 +124,7 @@ export const runAgent = (cfg: Config, job: AgentRun) =>
     createInterface({ input: child.stdout }).on('line', (line) => {
       const steps = agentSteps(line)
       outcome = steps.outcome ?? outcome
+      for (const tool of steps.tools) job.onTool?.(tool)
       for (const file of steps.files) job.onFile(file)
       if (steps.askedDatabase) job.onDatabaseWish()
       if (steps.model) job.onModel?.(steps.model)

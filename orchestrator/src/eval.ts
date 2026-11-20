@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util'
 import { loadConfig, type Config } from './config.js'
 import { gateway, type Gateway } from './gate.js'
 import { createPipeline, jobUsage, type Reporter } from './pipeline.js'
+import { timeSpent } from './receipt.js'
 import { openApp, type Seen } from './render.js'
 import { AgentError, JobTimeout, runAgent } from './sandbox.js'
 import { newJobId } from './server.js'
@@ -82,12 +83,20 @@ export const buildCase = async (cfg: Config, tools: Tools, dir: string, each: Ca
   const looks: Seen[] = []
   const models = new Map<string, number>()
   let published: Map<string, Buffer> | undefined
-  const report: Reporter = { status: (status) => void statuses.push({ status, at: Date.now() }), file: () => {}, note: (text) => void notes.push(text), cost: () => {} }
+  const report: Reporter = { status: (status) => void statuses.push({ status, at: Date.now() }), file: () => {}, note: (text) => void notes.push(text), receipt: () => {}, usage: () => {} }
 
   const pipeline = createPipeline(
     cfg,
     { getApp: () => undefined, setCurrentJob: () => {}, setHasDb: () => {} },
-    (config, job) => tools.run(config, { ...job, trial, onModel: (model) => void models.set(model, (models.get(model) ?? 0) + 1) }),
+    (config, job) =>
+      tools.run(config, {
+        ...job,
+        trial,
+        onModel: (model) => {
+          job.onModel?.(model)
+          models.set(model, (models.get(model) ?? 0) + 1)
+        },
+      }),
     async (_appId, _jobId, files) => {
       published = files
       for (const [path, bytes] of files) {
@@ -129,9 +138,7 @@ export const buildCase = async (cfg: Config, tools: Tools, dir: string, each: Ca
 
   const built = published !== undefined
   // How long the build spent in each step, a repair round included.
-  const spentMs: Record<string, number> = {}
-  statuses.forEach(({ status, at }, index) => (spentMs[status] = (spentMs[status] ?? 0) + (statuses[index + 1]?.at ?? ended) - at))
-  const steps = Object.fromEntries(Object.entries(spentMs).map(([status, ms]) => [status, seconds(ms)]))
+  const steps = Object.fromEntries(Object.entries(timeSpent(statuses, ended)).map(([status, ms]) => [status, seconds(ms)]))
   const own = [...(published ?? [])].filter(([path]) => !path.startsWith('lib/') && path !== 'preview.png')
   return {
     prompt_id: each.id,

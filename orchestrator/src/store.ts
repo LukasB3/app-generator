@@ -1,6 +1,7 @@
 // Node's built-in SQLite: no native dependency to compile on the server.
 import { existsSync, rmSync, statSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
+import { buildReceipt, type Receipt, type Stored, type Usage } from './receipt.js'
 
 export const STEPS = ['queued', 'preparing', 'coding', 'checking', 'publishing', 'done'] as const
 export type JobStatus = (typeof STEPS)[number] | 'failed'
@@ -29,6 +30,8 @@ export interface OwnedApp {
   status: JobStatus
   createdAt: number
   expiresAt: number
+  // How long the published build took and what it cost, if it has a receipt.
+  built: { seconds: number; costUsd: number } | null
 }
 
 // One visitor, known by address or by account.
@@ -93,6 +96,8 @@ const MIGRATIONS = [
   `ALTER TABLE apps ADD COLUMN currentJobId TEXT;`,
   // 6: apps with tables in the database. Such an app cannot be changed without the database.
   `ALTER TABLE apps ADD COLUMN hasDb INTEGER NOT NULL DEFAULT 0;`,
+  // 7: the receipt of a build, as JSON. Jobs from before this step have none.
+  `ALTER TABLE jobs ADD COLUMN receipt TEXT;`,
 ]
 
 export class Store {
@@ -102,6 +107,8 @@ export class Store {
   constructor(path: string) {
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA journal_mode = WAL')
+    // A command run next to the service may find the file busy for a moment.
+    this.db.exec('PRAGMA busy_timeout = 5000')
     if (path !== ':memory:') this.backup = `${path}.bak`
     this.migrate()
   }
@@ -128,9 +135,20 @@ export class Store {
 
   // A job either starts a new app, which gets the job's id, an owner if someone
   // is logged in, and an end, or it changes the app named in `appId`.
-  createJob({ id, prompt, ipHash, userId = null, now = Date.now(), ...app }: { id: string; prompt: string; ipHash: string; userId?: string | null; now?: number } & ({ expiresAt: number } | { appId: string })) {
+  // `screenMs` is how long the prompt screen took before the job was made.
+  createJob({
+    id,
+    prompt,
+    ipHash,
+    userId = null,
+    screenMs,
+    now = Date.now(),
+    ...app
+  }: { id: string; prompt: string; ipHash: string; userId?: string | null; screenMs?: number; now?: number } & ({ expiresAt: number } | { appId: string })) {
     if ('expiresAt' in app) this.db.prepare('INSERT INTO apps (id, ownerId, createdAt, expiresAt) VALUES (?, ?, ?, ?)').run(id, userId, now, app.expiresAt)
-    this.db.prepare('INSERT INTO jobs (id, appId, prompt, ipHash, userId, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(id, 'appId' in app ? app.appId : id, prompt, ipHash, userId, now)
+    this.db
+      .prepare('INSERT INTO jobs (id, appId, prompt, ipHash, userId, createdAt, receipt) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, 'appId' in app ? app.appId : id, prompt, ipHash, userId, now, JSON.stringify(screenMs === undefined ? {} : { screenMs: Math.round(screenMs) }))
     this.addEvent(id, 'status', 'queued', now)
   }
 
@@ -156,8 +174,8 @@ export class Store {
   }
 
   // The live apps of one account, newest first.
-  appsOf(ownerId: string, now = Date.now()) {
-    return this.db
+  appsOf(ownerId: string, now = Date.now()): OwnedApp[] {
+    const rows = this.db
       .prepare(
         `SELECT a.id, first.prompt, a.currentJobId, latest.id AS latestJobId, latest.status, a.createdAt, a.expiresAt,
                 (SELECT url FROM jobs WHERE appId = a.id AND url IS NOT NULL ORDER BY n DESC LIMIT 1) AS url
@@ -167,7 +185,11 @@ export class Store {
          WHERE a.ownerId = ? AND a.expiresAt > ?
          ORDER BY a.createdAt DESC`,
       )
-      .all(ownerId, now) as unknown as OwnedApp[]
+      .all(ownerId, now) as unknown as Omit<OwnedApp, 'built'>[]
+    return rows.map((row) => {
+      const receipt = row.currentJobId ? this.receipt(row.currentJobId) : null
+      return { ...row, built: receipt && { seconds: receipt.seconds.total, costUsd: receipt.costUsd } }
+    })
   }
 
   // The oldest job that waits, leaving out those a worker has already taken.
@@ -211,6 +233,26 @@ export class Store {
 
   setCost(id: string, microUsd: number) {
     this.db.prepare('UPDATE jobs SET costMicroUsd = ? WHERE id = ?').run(Math.ceil(microUsd), id)
+  }
+
+  // What the key proxy counted for a job: the cost for the budgets, the tokens for its receipt.
+  setUsage(id: string, { costMicroUsd, ...usage }: Usage) {
+    this.setCost(id, costMicroUsd)
+    this.addToReceipt(id, { usage })
+  }
+
+  addToReceipt(id: string, part: Stored) {
+    const row = this.db.prepare('SELECT receipt FROM jobs WHERE id = ?').get(id) as { receipt: string | null } | undefined
+    if (!row) return
+    this.db.prepare('UPDATE jobs SET receipt = ? WHERE id = ?').run(JSON.stringify({ ...(row.receipt ? JSON.parse(row.receipt) : {}), ...part }), id)
+  }
+
+  // The receipt of a job, or null for one from before receipts were kept.
+  receipt(id: string): Receipt | null {
+    const row = this.db.prepare('SELECT receipt, costMicroUsd FROM jobs WHERE id = ?').get(id) as { receipt: string | null; costMicroUsd: number } | undefined
+    if (!row?.receipt) return null
+    const statuses = this.db.prepare(`SELECT ts, data FROM events WHERE jobId = ? AND type = 'status' ORDER BY seq`).all(id) as { ts: number; data: string }[]
+    return buildReceipt(JSON.parse(row.receipt) as Stored, row.costMicroUsd, statuses)
   }
 
   setStatus(id: string, status: JobStatus, result: { url?: string; error?: string } = {}) {

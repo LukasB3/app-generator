@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { jobCost } from '../src/pipeline.js'
+import { jobUsage } from '../src/pipeline.js'
 import { createProxy, usageIn, vetRequest, type ProxyPolicy } from '../src/proxy.js'
 import { signJobToken, verifyJobToken } from '../src/token.js'
 
@@ -175,7 +175,7 @@ describe('proxy server', () => {
     expect(await usage(token)).toEqual({ requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costMicroUsd: 0 })
     await (await post('/v1/messages', token)).text()
     expect(await usage(token)).toEqual({ requests: 1, input: 100, output: 300, cacheRead: 1000, cacheWrite: 10, costMicroUsd: 3340 })
-    expect(await jobCost({ PROXY_URL: base, PROXY_SIGNING_SECRET: SECRET }, 'job-e')).toBe(3340)
+    expect(await jobUsage({ PROXY_URL: base, PROXY_SIGNING_SECRET: SECRET }, 'job-e')).toEqual({ requests: 1, input: 100, output: 300, cacheRead: 1000, cacheWrite: 10, costMicroUsd: 3340 })
 
     expect((await fetch(`${base}/v1/usage`, { headers: { 'x-api-key': 'sk-ant-guess' } })).status).toBe(401)
     expect((await usage(signJobToken(SECRET, 'job-other', future()))).requests).toBe(0)

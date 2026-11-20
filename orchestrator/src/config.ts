@@ -56,6 +56,8 @@ const schema = z.object({
 
   APPS_REPO: z.string().default('git@github.com:LukasB3/app-generator-apps.git'),
   APPS_BASE_URL: z.url().default('https://lukasb3.github.io/app-generator-apps'),
+  // Where people can read the published files of an app, under apps/<app-id>.
+  APPS_SOURCE_URL: z.url().default('https://github.com/LukasB3/app-generator-apps/tree/main'),
   DEPLOY_KEY_PATH: z.string().default('/etc/app-generator/deploy_key'),
   KNOWN_HOSTS_PATH: z.string().default('/etc/app-generator/known_hosts'),
   PUBLISH_WAIT_S: z.coerce.number().int().default(300),

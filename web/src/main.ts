@@ -3,6 +3,7 @@ import './page'
 import { API, authHeader, hasLogin, timeLeft } from './account'
 import { mountCaptcha } from './captcha'
 import { account } from './header'
+import { duration, receiptItems, sourceLink, type Receipt } from './receipt'
 
 // Cloudflare's always-pass test key, used when no real key is configured.
 const SITE_KEY = import.meta.env.VITE_TURNSTILE_SITEKEY ?? '1x00000000000000000000AA'
@@ -16,6 +17,8 @@ interface JobState {
   error: string | null
   expiresAt?: number | null
   now?: number
+  // Sent with a finished build only.
+  receipt?: Receipt | null
 }
 interface Progress {
   seq: number
@@ -146,6 +149,28 @@ const addNote = (step: number, text: string) => {
 }
 const clearNotes = () => document.querySelectorAll('#stages .notes').forEach((list) => list.remove())
 
+// At Done every step says how long it took, and the strip under the steps
+// sums the build up: time, cost, tokens, tool calls, files, model.
+const receiptStrip = $('receipt')
+const showReceipt = (receipt: Receipt) => {
+  clearReceipt()
+  for (const node of stages) {
+    const step = node.dataset.status as keyof Receipt['seconds']
+    if (step === 'total' || !(step in receipt.seconds)) continue
+    node.querySelector('strong')!.after(el('b', duration(receipt.seconds[step]), 'took'))
+  }
+  const link = sourceLink(receipt)
+  receiptStrip.querySelector('dl')!.replaceChildren(...receiptItems(receipt))
+  receiptStrip.append(...(link ? [link] : []))
+  receiptStrip.hidden = false
+}
+const clearReceipt = () => {
+  document.querySelectorAll('#stages .took').forEach((node) => node.remove())
+  receiptStrip.querySelector('dl')!.replaceChildren()
+  receiptStrip.querySelector('.source')?.remove()
+  receiptStrip.hidden = true
+}
+
 // Marks the steps: those before `at` are over. The one at `at` runs, is where
 // things stopped, or is still ahead while the job waits for its turn.
 const showSteps = (at: number, there: 'now' | 'stopped' | 'ahead' | 'over') => {
@@ -177,6 +202,7 @@ const show = (job: JobState) => {
   // A page loaded in the middle of a build starts its clock here.
   if (job.status !== 'done' && job.status !== 'failed') startClock()
 
+  if (job.status === 'done' && job.receipt) showReceipt(job.receipt)
   if (job.status === 'done' && job.url) {
     // A changed app keeps its address. Naming the build makes the browser fetch it instead of a copy it has kept.
     resultLink.href = `${job.url}?v=${job.id}`
@@ -228,6 +254,8 @@ const watch = (id: string) => {
     lastSeq = progress.seq
     if (progress.type === 'status') {
       step = Math.max(0, ORDER.indexOf(progress.data))
+      // A page that opens a failed build learns from these where it stopped.
+      if (progress.data !== 'failed') lastStage = progress.data as Status
       // A reloaded page has forgotten the click. The job's first event is the
       // nearest the server knows; a click on this page is earlier and stays.
       if (progress.data === 'queued' && clock !== undefined) {
@@ -252,6 +280,7 @@ const reset = () => {
   lastStage = 'queued'
   history.replaceState(null, '', location.pathname)
   clearNotes()
+  clearReceipt()
   result.hidden = true
   hidePreview()
   showSteps(-1, 'ahead')
@@ -271,6 +300,7 @@ form.addEventListener('submit', async (event) => {
   busy = true
   refreshSubmit()
   clearNotes()
+  clearReceipt()
   forgetHold()
   result.hidden = true
   hidePreview()
