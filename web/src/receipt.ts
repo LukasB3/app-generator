@@ -23,8 +23,8 @@ export const duration = (seconds: number) => {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
-// "1:13", "$0.10", "Sonnet 5.5": a build in a few figures.
-export const summary = (receipt: Pick<Receipt, 'seconds' | 'costUsd' | 'model'>) => [duration(receipt.seconds.total), dollars(receipt.costUsd), ...(receipt.model ? [modelName(receipt.model)] : [])]
+// "1:13", "$0.10": a build in two figures. The model is the same on every card, so the receipt names it.
+export const summary = (receipt: Pick<Receipt, 'seconds' | 'costUsd'>) => [duration(receipt.seconds.total), dollars(receipt.costUsd)]
 
 export const dollars = (usd: number) => (usd < 0.005 ? '<$0.01' : `$${usd.toFixed(2)}`)
 
