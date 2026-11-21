@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="/src/favicon.svg" type="image/svg+xml" />
+    <title>Privacy policy – App Generator</title>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="brand" href="./">App Generator</a>
+      <nav aria-label="About this project">
+        <a href="why">Why I built this</a>
+        <a href="safety">How it stays safe</a>
+      </nav>
+      <p class="who" id="who" hidden><span>Not logged in</span> <a href="apps">Log in</a></p>
+    </header>
+
+    <!-- This page follows the outline shared with lukasbossert.com and fahrplan-ulm.de: the same
+         sections in the same order under the same ids, and the same words wherever the facts are
+         the same. A change to a shared paragraph is made on all three sites. -->
+    <main class="prose">
+      <h1>Privacy policy</h1>
+
+      <h2 id="summary">In short</h2>
+      <p>This site collects as little data as possible. It sets no cookies, uses no analytics, shows no advertising and builds no user profiles.</p>
+      <p>Data is processed when you open a page, pass the captcha, send a request for an app, open a generated app or log in. What happens then is described in the sections below.</p>
+
+      <h2 id="controller">Controller</h2>
+      <p>The controller for the processing of personal data on this site under the General Data Protection Regulation (GDPR) is:</p>
+      <address>
+        Lukas Bossert<br />
+        Marienstraße 10<br />
+        89231 Neu-Ulm<br />
+        Germany
+      </address>
+      <p>Email: <a href="mailto:bossert.dev@gmail.com">bossert.dev@gmail.com</a></p>
+
+      <h2 id="visit">Visiting this site</h2>
+      <p>This site is delivered by Vercel Inc. (Covina, California, USA). When you open a page, Vercel processes the data your browser transmits: IP address, date and time, the address requested, browser and operating system, and the referring page. This is needed to deliver the page and to protect it against attacks. The legal basis is my legitimate interest in running the site securely (Art. 6 (1) (f) GDPR).</p>
+      <p>Vercel processes this data under its own responsibility as described in its privacy notice (<a href="https://vercel.com/legal/privacy-policy">vercel.com/legal/privacy-policy</a>) and is certified under the EU-US Data Privacy Framework. I do not analyse visits; the logs Vercel shows me reach back about one hour.</p>
+      <p>The start page also asks my server for the apps it shows, loads their pictures from GitHub and loads the captcha from Cloudflare. The page for logging in, and every page once a login is stored in your browser, contacts Supabase to check or renew the login. Each of them processes your IP address to answer and is described below.</p>
+
+      <h2 id="server">My server</h2>
+      <p>Requests for apps, the list of your apps and live data are handled by my server, which I rent from Hetzner Online GmbH (Gunzenhausen); it stands in Nuremberg, Germany. With every request the server receives your IP address. It keeps it in memory only, to limit the number of requests per connection and to fend off abuse. It is not written to disk and is gone at the latest when the service restarts. The legal basis is my legitimate interest in a stable service (Art. 6 (1) (f) GDPR).</p>
+      <p>The server keeps no access log: its logs contain no IP addresses. There is one exception: if a request fails because the service is just restarting, the web server in front of it writes an error entry with the IP address, the browser's identification and the address requested into the system log. This is rare. Such entries stay until the log is overwritten, which can take months.</p>
+
+      <h2 id="captcha">The captcha</h2>
+      <p>To keep automated abuse out, the start page, the login form and the form for changing an app load Turnstile from Cloudflare, Inc. (USA) as soon as the page opens. Turnstile runs a check in your browser and transmits your IP address and technical browser information to Cloudflare. The result is verified by my server, which passes your IP address to Cloudflare for that, or, for a login, by Supabase, which keeps the accounts. Cloudflare uses this data on my behalf to protect the site and, under its own responsibility, to improve its detection of bots. This is necessary to protect the service and its budget (Art. 6 (1) (f) GDPR).</p>
+
+      <h2 id="request">Sending a request</h2>
+      <p>When you send a request for an app, or for a change to one, my server receives the text and your IP address. The text is first screened automatically; a request that is turned away is not stored. An accepted request is stored with the time, the progress and result of the build, its cost and a keyed hash of your IP address, which lets the server enforce the limit per visitor without keeping the address itself. If you are logged in, your browser also sends your login, which contains your email address; the server keeps only the identifier of your account.</p>
+      <p>These build records are deleted after 30 days. The record that an app exists, with its end date and the account it belongs to, is deleted 30 days after the app has ended. A backup copy of the records, made when the software is updated, can hold them for up to about 60 days.</p>
+      <p>The text of your request is sent to Anthropic through its API, because its AI models screen the request and write the app; that includes requests that are turned away. For a change to an app, the app's stored files are sent along.</p>
+      <p>My contract partner is Anthropic Ireland, Limited (Dublin, Ireland); the texts are processed by Anthropic, PBC in the USA. Anthropic acts on my behalf, does not use the texts to train its models and as a rule deletes them within 30 days. The transfer to the USA is covered by the standard contractual clauses of the European Commission. Anthropic does not receive your IP address.</p>
+      <p>I process this data to provide the service you asked for and to protect it against abuse (Art. 6 (1) (b) and (f) GDPR).</p>
+
+      <h2 id="apps">Published apps</h2>
+      <p>The finished app and a picture of its first screen are stored in a public repository and served by GitHub Pages, a service of GitHub, Inc. (USA). Anyone can open the app, with or without its link, because the repository can be browsed and its files are publicly visible. The app is derived from your request, so anything you wrote there may show up in it. When you or someone else opens an app, GitHub processes the visitor's IP address to deliver it and logs it for security purposes. The same happens where this site shows an app's picture: on the start page, at the end of a build and under "My apps".</p>
+      <p>Apps are removed automatically after one day, or after ten days if you were logged in when you requested them, within about an hour of that time. Removed files remain in the history of the public repository. You can ask me by email to remove an app you requested earlier, or to erase it from that history as well.</p>
+      <p>A few apps that I requested myself are shown on the start page together with the text of my request. They stay online until I take them off.</p>
+
+      <h2 id="app-data">What you enter into an app</h2>
+      <p>Most apps keep what you enter in your own browser and nowhere else. All apps are served from the same address, so one app could read what another has stored in your browser.</p>
+      <p>Some apps keep data that all their visitors share, for example a guestbook or a poll. Such an app says at the bottom of its page that anything entered there is public. What you enter is then stored for me by Supabase (Supabase Pte. Ltd., Singapore) in a database in Frankfurt, Germany, where every visitor of the app can read it and anyone can add to it; in some apps anyone can also change and delete entries. Supabase processes your IP address when the app reads from or writes to the database. The stored data is deleted together with the app, and in the apps shown on the start page every day. The legal basis is my legitimate interest in letting apps keep shared data (Art. 6 (1) (f) GDPR).</p>
+      <p>Please do not enter personal data into a generated app.</p>
+
+      <h2 id="live-data">Apps with live data</h2>
+      <p>Some apps show the weather or exchange rates, and name their sources at the bottom of the page. When such an app loads that data, your browser asks my server, which processes your IP address to answer and to limit how often it is asked. For that it keeps a keyed hash of the address in memory for the day and writes nothing to disk. My server then asks Open-Meteo (Switzerland) for the weather or a place, or Frankfurter for the reference rates of the European Central Bank. They receive the position rounded to about a kilometre, the name of the place you searched for, or the currencies, and my server's address, not yours. My server keeps their answers in memory for up to a day, not linked to you. The legal basis is my legitimate interest in offering apps with live data (Art. 6 (1) (f) GDPR).</p>
+
+      <h2 id="account">An account</h2>
+      <p>The app generator works without an account. If you choose to log in, you enter your email address and receive a mail with a link and a code; there is no password. Your address is used to log you in and for nothing else: no newsletter and no notifications.</p>
+      <p>Accounts are kept for me by Supabase (Supabase Pte. Ltd., Singapore) in a database in Frankfurt, Germany. The account is created when you ask for the login mail, even if you never use it. Supabase stores your email address, an identifier for the account, the times of your logins and, for each login that is still valid, the IP address and browser it came from. The login mail is sent through Resend (Plus Five Five, Inc., USA), which receives your email address for that purpose. On my own server, the requests you send while logged in carry the identifier of your account, so that the page "My apps" can list your apps and keep them online for ten days. For as long as such an app is online, my server also keeps its files, so that you can change the app with another request.</p>
+      <p>I process this data to provide the account you asked for (Art. 6 (1) (b) GDPR). An account that has not been used for 90 days is deleted automatically. If you want it gone sooner, write to me from its address and I delete it together with the apps that belong to it.</p>
+
+      <h2 id="device">Stored on your device</h2>
+      <p>This site sets no cookies. If you log in, your login is kept in your browser's local storage until you log out or it runs out. This is needed to provide the function you asked for (Section 25 (2) no. 2 TDDDG). The site stores nothing else on your device. What a generated app stores there is described under <a href="#app-data">What you enter into an app</a>.</p>
+
+      <h2 id="recipients">Recipients and transfers outside the EU</h2>
+      <p>Only the parties named in this policy receive data:</p>
+      <ul>
+        <li>Vercel Inc., USA: delivers the site.</li>
+        <li>Hetzner Online GmbH, Germany: provides my server.</li>
+        <li>Cloudflare, Inc., USA: runs the captcha.</li>
+        <li>Anthropic Ireland, Limited, Ireland, with Anthropic, PBC, USA: screens requests and writes the apps.</li>
+        <li>GitHub, Inc., USA: stores and serves the published apps.</li>
+        <li>Supabase Pte. Ltd., Singapore, with a database in Frankfurt, Germany: keeps the accounts and the data that apps share.</li>
+        <li>Plus Five Five, Inc. (Resend), USA: sends the login mail.</li>
+        <li>Open-Meteo, Switzerland, and Frankfurter: answer questions about the weather and exchange rates; they receive nothing that identifies you.</li>
+      </ul>
+      <p>Transfers to the USA rely on the EU-US Data Privacy Framework where the recipient is certified under it, and otherwise on the standard contractual clauses of the European Commission.</p>
+      <p>Vercel, Cloudflare and GitHub are certified; Anthropic, Supabase and Resend use standard contractual clauses.</p>
+
+      <h2 id="email">Email</h2>
+      <p>If you email me, I process your address and message in order to reply (Art. 6 (1) (b) and (f) GDPR) and delete them once they are no longer needed. My mailbox is with Gmail, a service of Google (Google Ireland Limited, Dublin, Ireland); Google is certified under the EU-US Data Privacy Framework.</p>
+
+      <h2 id="rights">Your rights</h2>
+      <p>You have the right of access (Art. 15 GDPR), to rectification (Art. 16), to erasure (Art. 17), to restriction of processing (Art. 18) and to data portability (Art. 20). To exercise a right, an email to <a href="mailto:bossert.dev@gmail.com">bossert.dev@gmail.com</a> is enough.</p>
+      <p>A request sent without an account carries no name or address, so please include the link to your app or the time of your request so I can find it. If it is about an account, write from the address the account belongs to.</p>
+      <p>You are not obliged to provide any data. Without the data named in each section, however, the function concerned cannot be used. There is no automated decision-making within the meaning of Art. 22 GDPR.</p>
+      <p>You can also lodge a complaint with a data protection supervisory authority (Art. 77 GDPR), for example the Bavarian State Office for Data Protection Supervision (Bayerisches Landesamt für Datenschutzaufsicht), Promenade 18, 91522 Ansbach, Germany (<a href="https://www.lda.bayern.de">www.lda.bayern.de</a>).</p>
+
+      <h2 id="objection">Right to object</h2>
+      <p>Where I process data on the basis of a legitimate interest (Art. 6 (1) (f) GDPR), you can object at any time on grounds relating to your particular situation (Art. 21 GDPR). I then stop processing the data unless there are compelling legitimate grounds for it. An email is enough for this too.</p>
+
+      <p class="updated">Last updated: November 2026</p>
+    </main>
+
+    <footer>
+      <p><a href="./">Back to the app generator</a></p>
+      <nav aria-label="Legal">
+        <a href="legal">Legal notice</a>
+        <a href="privacy" aria-current="page">Privacy</a>
+      </nav>
+    </footer>
+
+    <script type="module" src="/src/page.ts"></script>
+  </body>
+</html>

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
     <link rel="icon" href="/src/favicon.svg" type="image/svg+xml" />
-    <title>Legal notice and privacy – App Generator</title>
+    <title>Legal notice – App Generator</title>
   </head>
   <body>
     <header class="bar">
@@ -17,20 +17,29 @@
       <p class="who" id="who" hidden><span>Not logged in</span> <a href="apps">Log in</a></p>
     </header>
 
+    <!-- This page follows the outline shared with lukasbossert.com and fahrplan-ulm.de: the same
+         sections in the same order under the same ids, and the same words wherever the facts are
+         the same. A change to a shared paragraph is made on all three sites. -->
     <main class="prose">
-      <h1>Legal notice and privacy</h1>
+      <h1>Legal notice</h1>
 
-      <h2 id="notice">Legal notice</h2>
-      <p>Information required under Section 5 of the German Digital Services Act (DDG).</p>
+      <h2 id="provider">Provider</h2>
+      <p>Information under Section 5 of the German Digital Services Act (Digitale-Dienste-Gesetz, DDG) and Section 18 (1) of the German Interstate Media Treaty (Medienstaatsvertrag, MStV).</p>
       <address>
         Lukas Bossert<br />
         Marienstraße 10<br />
         89231 Neu-Ulm<br />
         Germany
       </address>
+
+      <h2 id="contact">Contact</h2>
       <p>Email: <a href="mailto:bossert.dev@gmail.com">bossert.dev@gmail.com</a></p>
-      <p>Responsible for the content under Section 18 (2) of the German State Media Treaty (MStV): Lukas Bossert, address as above.</p>
-      <p>App Generator is a private, non-commercial demonstration project.</p>
+
+      <h2 id="responsible">Responsible for the content</h2>
+      <p>Lukas Bossert, address as above (Section 18 (2) MStV).</p>
+
+      <h2 id="about">About this site</h2>
+      <p>This website is a private, non-commercial project. It demonstrates how software can build small web apps from a description.</p>
 
       <h2 id="rules">Rules for using the app generator</h2>
       <p>You describe a small web app, software builds it automatically, and the result is published on a public page. By sending a request you agree to the following.</p>
@@ -44,55 +53,25 @@
 
       <h2 id="generated">Generated apps and how to report one</h2>
       <p>The apps are written by an AI model from visitors' requests and published at <span class="nowrap">lukasb3.github.io/app-generator-apps</span> without prior review by a person. Each one is checked automatically and carries a badge marking it as AI-generated. It cannot contact other servers, with two exceptions: an app that keeps data its visitors share can reach its own tables in a database, and an app that shows the weather or exchange rates can ask my server for them. They do not reflect my views. Each app stays online for one day, or for ten days if it was requested from an account, and is then removed. A few apps that I requested myself are shown on the start page and stay online until I take them off.</p>
-      <p>If an app infringes your rights or is unlawful, email me its address at <a href="mailto:bossert.dev@gmail.com">bossert.dev@gmail.com</a>. I remove such apps without delay once I learn of them.</p>
+      <p>If an app infringes your rights or is unlawful, email me at <a href="mailto:bossert.dev@gmail.com">bossert.dev@gmail.com</a>. Please name the app's address, say why you consider it unlawful, and give your name and email address. I confirm that your report has arrived, look at it myself, remove such an app without delay and tell you what I decided.</p>
+      <p>The same address is the single point of contact under Articles 11 and 12 of the EU Digital Services Act, for authorities and for users. You can write in German or English.</p>
 
-      <h2 id="liability">Liability</h2>
-      <p>As a service provider I am responsible for my own content on these pages under general law (Section 7 (1) DDG). Under Sections 8 to 10 DDG I am not obliged to monitor transmitted or stored third-party information or to look for circumstances that indicate unlawful activity. Obligations to remove or block the use of information under general law remain unaffected. Liability in this respect is only possible from the moment I become aware of a specific infringement.</p>
-      <p>This site links to external websites over whose content I have no influence. The respective provider is always responsible for the content of linked pages. If I become aware of an infringement, I will remove the link without delay.</p>
+      <h2 id="liability">Liability for content and links</h2>
+      <p>I am responsible for my own content on these pages under the general laws. This site links to third-party websites whose content I do not control; their providers are responsible for it. If I learn of an infringement, I remove the content or link concerned without delay.</p>
+      <p>Generated apps are not reviewed before they are published. As far as they are information stored at the request of visitors, I am not obliged to monitor them (Articles 6 and 8 of the EU Digital Services Act); I remove an unlawful app as soon as I learn of it.</p>
 
-      <h2 id="privacy">Privacy policy</h2>
-      <p>The controller under the GDPR is Lukas Bossert, reachable at the address and email above. The app generator uses no cookies, no analytics and no advertising. Fonts are served from this site. If you log in, your login is kept in your browser's local storage until you log out or it runs out; nothing else is stored on your device.</p>
+      <h2 id="privacy">Privacy</h2>
+      <p>What data this site processes is described in the <a href="privacy">privacy policy</a>.</p>
 
-      <h3>Visiting this site</h3>
-      <p>The site is hosted by Vercel Inc. (USA). When you open a page, Vercel processes your IP address and technical request data such as time, address requested and browser type in order to deliver the page and keep the service secure (Art. 6 (1) (f) GDPR).</p>
-
-      <h3>The captcha</h3>
-      <p>To keep automated abuse out, the request form and the login form load Turnstile from Cloudflare, Inc. (USA). Turnstile runs a check in your browser and transmits your IP address and technical browser information to Cloudflare, which returns a result that my server verifies, or, for a login, the provider that keeps the accounts. This is necessary to protect the service and its budget (Art. 6 (1) (f) GDPR).</p>
-
-      <h3>Sending a request</h3>
-      <p>When you send a request, my server (rented from Hetzner Online GmbH, located in Nuremberg, Germany) receives the text and your IP address. It stores the text, the time, the progress of the job and a keyed hash of your IP address, which lets it enforce the limit per visitor without keeping the address itself. If you are logged in, the record also holds the identifier of your account. These records are deleted after 30 days. The server keeps no access log with IP addresses.</p>
-      <p>The text of your request is sent to Anthropic, PBC (USA) through its API, because its AI models screen the request and write the app. Anthropic does not receive your IP address from me.</p>
-      <p>I process this data to provide the service you asked for and to protect it against abuse (Art. 6 (1) (b) and (f) GDPR).</p>
-
-      <h3>Published apps</h3>
-      <p>The finished app is stored in a public repository and served by GitHub Pages, a service of GitHub, Inc. (USA). Anyone who has the link can open it, and its files are publicly visible. The app is derived from your request, so anything you wrote there may show up in it. When you or someone else opens an app, GitHub processes the visitor's IP address to deliver it.</p>
-      <p>Apps are removed automatically after one day, or after ten days if you were logged in when you requested them. You can ask me to remove an app you requested earlier than that by emailing me its address.</p>
-
-      <h3>What you enter into an app</h3>
-      <p>Most apps keep what you enter in your own browser and nowhere else. Some apps keep data that all their visitors share, for example a guestbook or a poll. Such an app says at the bottom of its page that anything entered there is public. What you enter is then stored for me by Supabase (Supabase Pte. Ltd.) in a database in Frankfurt, Germany, where every visitor of the app can read it and anyone can add to it. Supabase processes your IP address when the app reads from or writes to the database. Please do not enter personal data into such an app. The stored data is deleted together with the app, and in the apps shown on the start page every day.</p>
-
-      <h3>Apps with live data</h3>
-      <p>Some apps show the weather or exchange rates, and name their sources at the bottom of the page. When such an app loads that data, your browser asks my server, which processes your IP address to answer and to limit how often it is asked. For that it keeps a keyed hash of the address in memory until the end of the day and stores nothing. My server then asks Open-Meteo (Switzerland) for the weather or a place, or Frankfurter for the reference rates of the European Central Bank. They receive the position rounded to about a kilometre, the name of the place you searched for, or the currencies, and my server's address, not yours.</p>
-
-      <h3>An account</h3>
-      <p>The app generator works without an account. If you choose to log in, you enter your email address and receive a mail with a link and a code; there is no password. Your address is used to log you in and for nothing else: no newsletter and no notifications.</p>
-      <p>Accounts are kept for me by Supabase (Supabase Pte. Ltd.) in a database in Frankfurt, Germany. It stores your email address, an identifier for the account and the times of your logins, and it sees your IP address when you log in. The login mail is sent through Resend (Plus Five Five, Inc., USA), which receives your email address for that purpose. On my own server, the requests you send while logged in carry the identifier of your account, so that the page "My apps" can list your apps and keep them online for ten days. For as long as such an app is online, my server also keeps its files, so that you can change the app with another request.</p>
-      <p>I process this data to provide the account you asked for (Art. 6 (1) (b) GDPR). An account that has not been used for 90 days is deleted automatically. If you want it gone sooner, write to me from its address and I delete it together with the apps that belong to it.</p>
-
-      <h3>Transfers to countries outside the EU</h3>
-      <p>Vercel, Cloudflare, Anthropic, GitHub and Resend are based in the USA, and Supabase belongs to a group with companies in the USA and Singapore. Transfers are covered by the EU-US Data Privacy Framework where the provider is certified under it, and otherwise by the standard contractual clauses of the European Commission.</p>
-
-      <h3>Email</h3>
-      <p>If you email me, I process your address and message in order to reply (Art. 6 (1) (b) and (f) GDPR) and delete them once they are no longer needed.</p>
-
-      <h3>Your rights</h3>
-      <p>You have the right to access, rectification, erasure, restriction of processing, data portability and objection under Arts. 15 to 21 GDPR, and the right to lodge a complaint with a supervisory authority, for example the Bayerisches Landesamt für Datenschutzaufsicht. To exercise your rights, email me at the address above. A request sent without an account carries no name or address, so please include the link to your app or the time of your request so I can find it. If it is about an account, write from the address the account belongs to.</p>
-
-      <p class="updated">Last updated: 20 November 2026</p>
+      <p class="updated">Last updated: November 2026</p>
     </main>
 
     <footer>
       <p><a href="./">Back to the app generator</a></p>
+      <nav aria-label="Legal">
+        <a href="legal" aria-current="page">Legal notice</a>
+        <a href="privacy">Privacy</a>
+      </nav>
     </footer>
 
     <script type="module" src="/src/page.ts"></script>

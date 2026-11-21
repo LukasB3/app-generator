@@ -1168,7 +1168,7 @@ dd {
   margin-top: clamp(2rem, 5vw, 3rem);
 }
 
-/* Legal page */
+/* Legal notice and privacy policy */
 
 .prose > * {
   max-width: 44rem;
@@ -1182,12 +1182,6 @@ dd {
   margin: 3.5rem 0 0;
   font: 600 1.625rem/1.2 var(--display);
   scroll-margin-top: 1.5rem;
-}
-
-.prose h3 {
-  margin: 2rem 0 0;
-  font-size: 1.125rem;
-  font-weight: 700;
 }
 
 .prose p,
@@ -1240,6 +1234,11 @@ footer nav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 1.5rem;
+}
+
+/* The page you are on. */
+footer nav a[aria-current] {
+  color: var(--ink);
 }
 
 /* Narrow windows: the line of steps runs downwards */

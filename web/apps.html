@@ -25,7 +25,7 @@
           <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required />
           <div id="captcha"></div>
           <button id="send" class="primary" type="submit" disabled>Send me a login mail</button>
-          <p class="consent">There is no password. The mail holds a link and a code, and either one logs you in. Your address is used for logging in and nothing else, as described in the <a href="legal#privacy">privacy policy</a>.</p>
+          <p class="consent">There is no password. The mail holds a link and a code, and either one logs you in. Your address is used for logging in and nothing else, as described in the <a href="privacy#account">privacy policy</a>.</p>
         </form>
 
         <form id="confirm" class="entry" novalidate hidden>
@@ -58,6 +58,10 @@
 
     <footer>
       <p><a href="./">Back to the app generator</a></p>
+      <nav aria-label="Legal">
+        <a href="legal">Legal notice</a>
+        <a href="privacy">Privacy</a>
+      </nav>
     </footer>
 
     <script type="module" src="/src/apps.ts"></script>
